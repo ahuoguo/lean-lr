@@ -45,7 +45,7 @@ inductive SynTyped : Context → Expr → Ty → Prop where
   -- TODO: semantics course did not consider anonymous lambdas, we follow them
   | lam_named : ∀ {Γ x e A B},
       SynTyped (Γ.insert x A) e B →
-      SynTyped Γ (λ: x, e) (A ⇒ B)
+      SynTyped Γ (Expr.lam (Binder.named x) e) (A ⇒ B)
 
   | app : ∀ {Γ e₁ e₂ A B},
       SynTyped Γ e₁ (A ⇒ B) →

@@ -8,7 +8,7 @@ namespace STLC
 -- Termination measure for mutual recursion: type size
 def Ty.size : Ty → Nat
   | Ty.int => 0
-  | Ty.fun A B => 1 + A.size + B.size
+  | A ⇒ B => 1 + A.size + B.size
 
 -- Value relation: 𝒱⟦τ⟧
 -- Expression relation: ℰ⟦τ⟧
@@ -19,7 +19,7 @@ mutual
     match τ, v with
     | Ty.int, Val.litIntV _ => True
     | Ty.int, _ => False
-    | Ty.fun A B, Val.lamV x e =>
+    | A ⇒ B, Val.lamV x e =>
         Expr.closed (x :b: []) e ∧
         ∀ v', valRel A v' → exprRel B (subst' x v'.toExpr e)
     | Ty.fun _ _, _ => False
@@ -52,16 +52,16 @@ def Subst.dom (σ : Subst) : List String :=
   σ.map (·.1)
 
 -- Apply finite map substitution to expression
-def applySubst (σ : Subst) : Expr → Expr
+def substMap (σ : Subst) : Expr → Expr
   | Expr.var x => match List.lookup x σ with
     | some e => e
     | none => Expr.var x
   | Expr.lam (Binder.named x) e =>
-      Expr.lam (Binder.named x) (applySubst (σ.delete x) e)
-  | Expr.lam Binder.anon e => Expr.lam Binder.anon (applySubst σ e)
-  | Expr.app e₁ e₂ => Expr.app (applySubst σ e₁) (applySubst σ e₂)
+      Expr.lam (Binder.named x) (substMap (σ.delete x) e)
+  | Expr.lam Binder.anon e => Expr.lam Binder.anon (substMap σ e)
+  | Expr.app e₁ e₂ => Expr.app (substMap σ e₁) (substMap σ e₂)
   | Expr.litInt n => Expr.litInt n
-  | Expr.plus e₁ e₂ => Expr.plus (applySubst σ e₁) (applySubst σ e₂)
+  | Expr.plus e₁ e₂ => Expr.plus (substMap σ e₁) (substMap σ e₂)
 
 
 -- Semantic typing for substitutions (environments)
@@ -90,7 +90,7 @@ notation:50 "𝒢⟦" Γ "⟧" σ:50 => semContextRel Γ σ
 -- Semantic typing judgment: Γ ⊨ e : τ
 def semTyped (Γ : Context) (e : Expr) (τ : Ty) : Prop :=
   Expr.closed Γ.dom e ∧
-  ∀ σ: Subst, 𝒢⟦Γ⟧ σ → ℰ⟦τ⟧ (applySubst σ e)
+  ∀ σ: Subst, 𝒢⟦Γ⟧ σ → ℰ⟦τ⟧ (substMap σ e)
 
 notation:75 Γ:75 " ⊨ " e:74 " : " τ:74 => semTyped Γ e τ
 
@@ -141,19 +141,19 @@ theorem semContextRel_dom {Γ : Context} {σ : Subst} :
     rw [← map_fst_filter]
 
 -- Helper: applying empty substitution is identity
-theorem applySubst_empty (e : Expr) : applySubst Subst.empty e = e := by
+theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
   induction e with
-  | var x => simp [applySubst, Subst.empty]
+  | var x => simp [substMap, Subst.empty]
   | lam x e' ih =>
       cases x with
-      | anon => simp [applySubst, ih]
+      | anon => simp [substMap, ih]
       | named y =>
-        simp [applySubst, Subst.empty]
+        simp [substMap, Subst.empty]
         simp [Subst.delete]
         apply ih
-  | app e₁ e₂ ih₁ ih₂ => simp [applySubst, ih₁, ih₂]
-  | litInt n => simp [applySubst]
-  | plus e₁ e₂ ih₁ ih₂ => simp [applySubst, ih₁, ih₂]
+  | app e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
+  | litInt n => simp [substMap]
+  | plus e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
 
 -- Compatibility for integer literals
 theorem compat_int {Γ : Context} {n : Int} :
@@ -168,7 +168,7 @@ theorem compat_int {Γ : Context} {n : Int} :
     exists Val.litIntV n
     constructor
     · -- big-step evaluation
-      simp [applySubst]
+      simp [substMap]
       exact BigStep.litInt
     · -- value relation
       unfold valRel
@@ -242,7 +242,7 @@ theorem compat_var {Γ : Context} {x : String} {A : Ty} :
     -- Extract the value from the semantic context
     obtain ⟨v, hσ, hv⟩ := semCtxRelVal hctx hlookup
     -- Apply substitution to var x
-    unfold applySubst
+    unfold substMap
     unfold Subst.lookup at hσ
     simp only [hσ]
     -- Show v.toExpr ∈ ℰ⟦A⟧
@@ -258,20 +258,111 @@ theorem compat_var {Γ : Context} {x : String} {A : Ty} :
 theorem lamClosed Γ θ (x: String) A e :
     Expr.closed (Context.dom (Context.insert Γ x A)) e →
     𝒢⟦Γ⟧ θ →
-    Expr.closed [] (λ: x, (applySubst (θ.delete x) e)) := by
+    Expr.closed [] (Expr.lam (Binder.named x) (substMap (θ.delete x) e)) := by
   sorry
+
+-- Helper: element of filtered list is element of original list
+theorem mem_of_mem_filter {α : Type _} [DecidableEq α] {l : List α} {x : α} {p : α → Bool} :
+    x ∈ l.filter p → x ∈ l := by
+  intro h
+  induction l with
+  | nil => simp at h
+  | cons a l ih =>
+    unfold List.filter at h
+    split at h
+    · -- p a = true
+      cases h
+      · exact .head _
+      · exact .tail _ (ih (by assumption))
+    · -- p a = false
+      exact .tail _ (ih h)
+
+-- Helper: weakening for closed expressions
+theorem closed_weaken {X Y : List String} {e : Expr} :
+    Expr.closed X e → (∀ x, x ∈ X → x ∈ Y) → Expr.closed Y e := by
+  sorry
+
+-- Helper: composing substitutions
+-- subst x v (substMap (θ.delete x) e) = substMap (θ.insert x v) e
+theorem subst_substMap_compose {x : String} {v : Expr} {θ : Subst} {e : Expr} :
+    subst x v (substMap (θ.delete x) e) = substMap (Subst.insert x v θ) e := by
+  sorry
+
+-- Helper: semantic contexts are closed
+theorem semContextRel_closed {Γ : Context} {θ : Subst} :
+    𝒢⟦Γ⟧ θ → ∀ x e, θ.lookup x = some e → Expr.closed [] e := by
+  sorry
+
+-- (** Lemma about the interaction with "normal" substitution. *)
+-- Lemma subst_subst_map x es map e :
+--   subst_closed [] map →
+--   subst x es (subst_map (delete x map) e) =
+--   subst_map (<[x:=es]> map) e.
 
 -- Compatibility for lambda abstractions (named binder)
 theorem compatLamNamed {Γ : Context} {x : String} {e : Expr} {A B : Ty} :
     (Γ.insert x A) ⊨ e : B →
-    Γ ⊨ (λ: x, e) : (Ty.fun A B) := by
+    Γ ⊨ Expr.lam (Binder.named x) e : (A ⇒ B) := by
   intro ⟨hcl, hsem⟩
   unfold semTyped
-  sorry
+  constructor
+  · -- closedness: Expr.closed Γ.dom (Expr.lam (Binder.named x) e)
+    simp [Expr.closed, Binder.cons]
+    -- hcl : Expr.closed (Context.dom (Context.insert Γ x A)) e
+    -- Need: Expr.closed (x :: Γ.dom) e
+    apply closed_weaken hcl
+    intro y hy
+    -- y ∈ Context.dom (Context.insert Γ x A) → y ∈ x :: Γ.dom
+    unfold Context.insert Context.dom at hy
+    simp only [List.map_cons] at hy
+    match hy with
+    | .head _ =>
+      -- y = x, so y ∈ x :: Γ.dom
+      exact List.Mem.head Γ.dom
+    | .tail _ hymem =>
+      -- hymem : y ∈ (Γ.delete x).map Prod.fst
+      -- Need to show: y ∈ x :: Γ.dom
+      apply List.Mem.tail x
+      -- Now need: y ∈ Γ.dom
+      unfold Context.dom
+      -- hymem : y ∈ (Γ.filter (fun p => p.1 ≠ x)).map Prod.fst
+      -- Use map_fst_filter to rewrite
+      suffices y ∈ (Γ.map Prod.fst).filter (· ≠ x) by exact mem_of_mem_filter this
+      rw [← map_fst_filter]
+      exact hymem
+  · -- semantic typing
+    intro θ hctx
+    unfold exprRel
+    -- substMap θ (Expr.lam (Binder.named x) e) = Expr.lam (Binder.named x) (substMap (θ.delete x) e)
+    simp [substMap]
+    -- Provide witness
+    exists Val.lamV (Binder.named x) (substMap (θ.delete x) e)
+    constructor
+    · -- evaluation: Expr.lam (Binder.named x) (substMap (θ.delete x) e) ⇓ Val.lamV ...
+      exact BigStep.lam
+    · -- value relation: 𝒱⟦A ⇒ B⟧ (Val.lamV (Binder.named x) (substMap (θ.delete x) e))
+      unfold valRel
+      constructor
+      · -- closedness: Expr.closed ((Binder.named x) :b: []) (substMap (θ.delete x) e)
+        -- lamClosed gives: Expr.closed [] (Expr.lam (Binder.named x) (substMap (θ.delete x) e))
+        -- which unfolds to: Expr.closed ((Binder.named x) :b: []) (substMap (θ.delete x) e)
+        have h := lamClosed Γ θ x A e hcl hctx
+        simp [Expr.closed, Binder.cons] at h
+        exact h
+      · -- ∀ v', 𝒱⟦A⟧ v' → ℰ⟦B⟧ (subst' (Binder.named x) v'.toExpr (substMap (θ.delete x) e))
+        intro v' hv'
+        -- Unfold subst'
+        simp [subst']
+        -- Use substitution composition
+        rw [subst_substMap_compose]
+        -- Apply hsem with extended substitution
+        apply hsem
+        -- Show 𝒢⟦Γ.insert x A⟧ (Subst.insert x v'.toExpr θ)
+        exact semContextRel.semContextRel_insert Γ θ v' x A hv' hctx
 
 -- Compatibility for application
 theorem compatApp {Γ : Context} {e₁ e₂ : Expr} {A B : Ty} :
-    Γ ⊨ e₁ : (Ty.fun A B) →
+    Γ ⊨ e₁ : (A ⇒ B) →
     Γ ⊨ e₂ : A →
     Γ ⊨ Expr.app e₁ e₂ : B := by
   intro ⟨hcl₁, hsem₁⟩ ⟨hcl₂, hsem₂⟩
@@ -303,7 +394,7 @@ theorem compatApp {Γ : Context} {e₁ e₂ : Expr} {A B : Ty} :
       unfold exprRel
       exists v
       constructor
-      · simp [applySubst]
+      · simp [substMap]
         apply BigStep.app heval₁ heval₂ heval
       · exact hv
 
@@ -338,7 +429,7 @@ theorem compatPlus {Γ : Context} {e₁ e₂ : Expr} :
         unfold exprRel
         exists Val.litIntV (n₁ + n₂)
         constructor
-        · simp [applySubst]
+        · simp [substMap]
           exact BigStep.plus heval₁ heval₂
         · unfold valRel
           trivial
@@ -370,7 +461,7 @@ theorem termination {e : Expr} {A : Ty} :
   -- Specialize with empty substitution
   specialize hsem Subst.empty semContextRel.semContextRel_empty
   -- The empty substitution applied to e gives e
-  rw [applySubst_empty] at hsem
+  rw [substMap_empty] at hsem
   -- hsem : ℰ⟦A⟧ e
   unfold exprRel at hsem
   -- Extract the value
