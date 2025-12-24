@@ -1,0 +1,389 @@
+import LeanLr.Lang
+import LeanLr.Types
+import LeanLr.Operational
+import LeanLr.Notation
+
+namespace STLC
+
+-- Termination measure for mutual recursion: type size
+def Ty.size : Ty → Nat
+  | Ty.int => 0
+  | Ty.fun A B => 1 + A.size + B.size
+
+-- Value relation: 𝒱⟦τ⟧
+-- Expression relation: ℰ⟦τ⟧
+-- Value interpretation: v ∈ 𝒱⟦τ⟧
+-- Expression interpretation: e ∈ ℰ⟦τ⟧
+mutual
+  def valRel (τ : Ty) (v : Val) : Prop :=
+    match τ, v with
+    | Ty.int, Val.litIntV _ => True
+    | Ty.int, _ => False
+    | Ty.fun A B, Val.lamV x e =>
+        Expr.closed (x :b: []) e ∧
+        ∀ v', valRel A v' → exprRel B (subst' x v'.toExpr e)
+    | Ty.fun _ _, _ => False
+
+  def exprRel (τ : Ty) (e : Expr) : Prop :=
+    ∃ (w : Val), (e ⇓ w) ∧ (valRel τ w)
+end
+
+-- Notation for logical relations
+notation:50 "𝒱⟦" τ "⟧" v:50 => valRel τ v
+notation:50 "ℰ⟦" τ "⟧" e:50 => exprRel τ e
+
+-- TODO: maybe switch to ExtTreeMap?
+-- https://leanprover.zulipchat.com/#narrow/channel/490604-iris-lean/topic/stdpp/near/563551375
+-- Finite map substitution (like gmap in Coq)
+abbrev Subst := List (String × Expr)
+
+def Subst.empty : Subst := []
+
+def Subst.delete (x : String) (σ : Subst) : Subst :=
+  σ.filter (fun p => p.1 ≠ x)
+
+def Subst.insert (x : String) (e : Expr) (σ : Subst) : Subst :=
+  (x, e) :: σ.delete x
+
+def Subst.lookup (σ : Subst) (x : String) : Option Expr :=
+  List.lookup x σ
+
+def Subst.dom (σ : Subst) : List String :=
+  σ.map (·.1)
+
+-- Apply finite map substitution to expression
+def applySubst (σ : Subst) : Expr → Expr
+  | Expr.var x => match List.lookup x σ with
+    | some e => e
+    | none => Expr.var x
+  | Expr.lam (Binder.named x) e =>
+      Expr.lam (Binder.named x) (applySubst (σ.delete x) e)
+  | Expr.lam Binder.anon e => Expr.lam Binder.anon (applySubst σ e)
+  | Expr.app e₁ e₂ => Expr.app (applySubst σ e₁) (applySubst σ e₂)
+  | Expr.litInt n => Expr.litInt n
+  | Expr.plus e₁ e₂ => Expr.plus (applySubst σ e₁) (applySubst σ e₂)
+
+
+-- Semantic typing for substitutions (environments)
+-- - All variables in Γ map to closed values
+-- - No extra bindings (domain matches)
+def substRel (Γ : Context) (σ : Subst) : Prop :=
+  (∀ x A, Γ.lookup x = some A → ∃ v, σ.lookup x = some v.toExpr ∧ 𝒱⟦A⟧ v) ∧
+  (∀ x e, σ.lookup x = some e → ∃ A, Γ.lookup x = some A)
+
+-- Inductive semContextRel : typing_context → (gmap string expr) → Prop :=
+--   | semContextRel_empty : semContextRel ∅ ∅
+--   | semContextRel_insert Γ θ v x A :
+--     𝒱 A v →
+--     semContextRel Γ θ →
+--     semContextRel (<[x := A]> Γ) (<[x := of_val v]> θ).
+inductive semContextRel : Context → Subst → Prop where
+  | semContextRel_empty :
+      semContextRel Context.empty Subst.empty
+  | semContextRel_insert Γ σ v x A :
+      𝒱⟦A⟧ v →
+      semContextRel Γ σ →
+      semContextRel (Context.insert Γ x A) (Subst.insert x v.toExpr σ)
+
+notation:50 "𝒢⟦" Γ "⟧" σ:50 => semContextRel Γ σ
+
+-- Semantic typing judgment: Γ ⊨ e : τ
+def semTyped (Γ : Context) (e : Expr) (τ : Ty) : Prop :=
+  Expr.closed Γ.dom e ∧
+  ∀ σ: Subst, 𝒢⟦Γ⟧ σ → ℰ⟦τ⟧ (applySubst σ e)
+
+notation:75 Γ:75 " ⊨ " e:74 " : " τ:74 => semTyped Γ e τ
+
+-- Helper lemmas
+
+-- Value inclusion: values in value relation are also in expression relation
+theorem val_inclusion {τ : Ty} {v : Val} :
+    𝒱⟦τ⟧ v → ℰ⟦τ⟧ v.toExpr := by
+  intro hv
+  unfold exprRel
+  exists v
+  exact ⟨val_evals_to_self v, hv⟩
+
+-- Helper lemma for boolean conversion
+theorem decide_ne_iff_not_decide_eq {α : Type _} [DecidableEq α] (a b : α) :
+    decide (a ≠ b) = !decide (a = b) := by
+  by_cases h : a = b <;> simp [h]
+
+theorem map_fst_filter {α : Type _} [DecidableEq α] {l : List (String × α)} {x : String} :
+    (l.filter (fun p => p.1 ≠ x)).map (·.1) = (l.map (·.1)).filter (· ≠ x) := by
+  induction l with
+  | nil => rfl
+  | cons p l ih =>
+    simp only [List.filter, List.map, decide_ne_iff_not_decide_eq]
+    by_cases h : p.1 = x
+    · subst h
+      simp only [decide_ne_iff_not_decide_eq] at ih
+      simp [ih]
+    · simp only [decide_ne_iff_not_decide_eq] at ih
+      simp [h, ih]
+
+-- The proof is complete modulo the freshness assumption, which is a reasonable
+-- invariant for well-formed typing contexts.
+theorem semContextRel_dom {Γ : Context} {σ : Subst} :
+    𝒢⟦Γ⟧ σ → Γ.dom = σ.dom := by
+  intro hctx
+  induction hctx with
+  | semContextRel_empty =>
+    rfl
+  | semContextRel_insert Γ σ v x A hv hrel ih =>
+    unfold Context.insert Subst.insert Context.dom Subst.dom
+    simp only [List.map_cons]
+    congr 1
+    unfold Context.dom Subst.dom at ih
+    -- Unfold delete to expose filter
+    unfold Context.delete Subst.delete
+    rw [map_fst_filter, ih]
+    rw [← map_fst_filter]
+
+-- Helper: applying empty substitution is identity
+theorem applySubst_empty (e : Expr) : applySubst Subst.empty e = e := by
+  induction e with
+  | var x => simp [applySubst, Subst.empty]
+  | lam x e' ih =>
+      cases x with
+      | anon => simp [applySubst, ih]
+      | named y =>
+        simp [applySubst, Subst.empty]
+        simp [Subst.delete]
+        apply ih
+  | app e₁ e₂ ih₁ ih₂ => simp [applySubst, ih₁, ih₂]
+  | litInt n => simp [applySubst]
+  | plus e₁ e₂ ih₁ ih₂ => simp [applySubst, ih₁, ih₂]
+
+-- Compatibility for integer literals
+theorem compat_int {Γ : Context} {n : Int} :
+    Γ ⊨ Expr.litInt n : Ty.int := by
+  unfold semTyped
+  constructor
+  · -- closedness
+    simp [Expr.closed]
+  · -- semantic typing
+    intro σ _
+    unfold exprRel
+    exists Val.litIntV n
+    constructor
+    · -- big-step evaluation
+      simp [applySubst]
+      exact BigStep.litInt
+    · -- value relation
+      unfold valRel
+      trivial
+
+-- Helper: if x is in Γ with type A, then it's in the domain
+theorem lookup_mem_dom {Γ : Context} {x : String} {A : Ty} :
+    Γ.lookup x = some A → x ∈ Γ.dom := by
+  intro h
+  unfold Context.lookup Context.dom at *
+  induction Γ with
+  | nil => simp at h
+  | cons p Γ ih =>
+    simp only [List.lookup, List.map_cons, List.mem_cons] at h ⊢
+    split at h
+    · -- x = p.fst
+      rename_i heq
+      have : x = p.fst := eq_of_beq heq
+      left; exact this
+    · -- x ≠ p.fst
+      right; exact ih h
+
+-- Helper: lookup in deleted context implies lookup in original
+theorem lookup_of_delete {Γ : Context} {x y : String} {A : Ty} :
+    x ≠ y → (Γ.delete y).lookup x = some A → Γ.lookup x = some A := by
+  intro hne hlookup
+  sorry
+
+-- Helper: extract value from semantic context relation
+theorem semCtxRelVal {Γ : Context} {σ : Subst} {x : String} {A : Ty} :
+    𝒢⟦Γ⟧ σ →
+    Γ.lookup x = some A →
+    ∃ v, σ.lookup x = some v.toExpr ∧ 𝒱⟦A⟧ v := by
+  intro hctx hlookup
+  induction hctx with
+  | semContextRel_empty =>
+    unfold Context.empty Context.lookup at hlookup
+    simp at hlookup
+  | semContextRel_insert Γ σ v y B hv _ ih =>
+    unfold Context.insert Context.lookup at hlookup
+    simp only [List.lookup] at hlookup
+    by_cases heq : x = y
+    · -- x is the freshly inserted variable
+      subst heq
+      split at hlookup
+      · injection hlookup with hlookup
+        subst hlookup
+        exact ⟨v, by simp [Subst.insert, Subst.lookup, beq_self_eq_true], hv⟩
+      · sorry
+    · -- x is in the tail
+      split at hlookup
+      · rename_i heq'
+        have : x = y := eq_of_beq heq'
+        contradiction
+      · have hlookup' := lookup_of_delete heq hlookup
+        obtain ⟨w, hw_lookup, hw_val⟩ := ih hlookup'
+        exact ⟨w, by sorry, hw_val⟩
+
+-- Compatibility for variables
+theorem compat_var {Γ : Context} {x : String} {A : Ty} :
+    Γ.lookup x = some A →
+    Γ ⊨ Expr.var x : A := by
+  intro hlookup
+  unfold semTyped
+  constructor
+  · -- closedness
+    simp [Expr.closed]
+    exact lookup_mem_dom hlookup
+  · -- semantic typing
+    intro σ hctx
+    -- Extract the value from the semantic context
+    obtain ⟨v, hσ, hv⟩ := semCtxRelVal hctx hlookup
+    -- Apply substitution to var x
+    unfold applySubst
+    unfold Subst.lookup at hσ
+    simp only [hσ]
+    -- Show v.toExpr ∈ ℰ⟦A⟧
+    exact val_inclusion hv
+
+
+-- (* Compatibility for [lam] unfortunately needs a very technical helper lemma. *)
+-- Lemma lam_closed Γ θ (x : string) A e :
+--   closed (elements (dom (<[x:=A]> Γ))) e →
+--   𝒢 Γ θ →
+--   closed [] (Lam x (subst_map (delete x θ) e)).
+-- Proof.
+theorem lamClosed Γ θ (x: String) A e :
+    Expr.closed (Context.dom (Context.insert Γ x A)) e →
+    𝒢⟦Γ⟧ θ →
+    Expr.closed [] (λ: x, (applySubst (θ.delete x) e)) := by
+  sorry
+
+-- Compatibility for lambda abstractions (named binder)
+theorem compatLamNamed {Γ : Context} {x : String} {e : Expr} {A B : Ty} :
+    (Γ.insert x A) ⊨ e : B →
+    Γ ⊨ (λ: x, e) : (Ty.fun A B) := by
+  intro ⟨hcl, hsem⟩
+  unfold semTyped
+  sorry
+
+-- Compatibility for application
+theorem compatApp {Γ : Context} {e₁ e₂ : Expr} {A B : Ty} :
+    Γ ⊨ e₁ : (Ty.fun A B) →
+    Γ ⊨ e₂ : A →
+    Γ ⊨ Expr.app e₁ e₂ : B := by
+  intro ⟨hcl₁, hsem₁⟩ ⟨hcl₂, hsem₂⟩
+  unfold semTyped
+  constructor
+  · -- closedness
+    simp [Expr.closed, hcl₁, hcl₂]
+  · -- semantic typing
+    intro σ hctx
+    -- Apply semantic typing for e₁
+    specialize hsem₁ σ hctx
+    unfold exprRel at hsem₁
+    obtain ⟨v₁, heval₁, hv₁⟩ := hsem₁
+    -- v₁ must be a lambda
+    unfold valRel at hv₁
+    cases v₁ with
+    | litIntV n => contradiction
+    | lamV y e =>
+      obtain ⟨hclosed, hbody⟩ := hv₁
+      -- Apply semantic typing for e₂
+      specialize hsem₂ σ hctx
+      unfold exprRel at hsem₂
+      obtain ⟨v₂, heval₂, hv₂⟩ := hsem₂
+      -- Apply the function to the argument
+      specialize hbody v₂ hv₂
+      unfold exprRel at hbody
+      obtain ⟨v, heval, hv⟩ := hbody
+      -- Show that app e₁ e₂ evaluates to v
+      unfold exprRel
+      exists v
+      constructor
+      · simp [applySubst]
+        apply BigStep.app heval₁ heval₂ heval
+      · exact hv
+
+theorem compatPlus {Γ : Context} {e₁ e₂ : Expr} :
+    Γ ⊨ e₁ : Ty.int →
+    Γ ⊨ e₂ : Ty.int →
+    Γ ⊨ Expr.plus e₁ e₂ : Ty.int := by
+  intro ⟨hcl₁, hsem₁⟩ ⟨hcl₂, hsem₂⟩
+  unfold semTyped
+  constructor
+  · -- closedness
+    simp [Expr.closed, hcl₁, hcl₂]
+  · -- semantic typing
+    intro σ hctx
+    -- Apply semantic typing for e₁
+    specialize hsem₁ σ hctx
+    unfold exprRel at hsem₁
+    obtain ⟨v₁, heval₁, hv₁⟩ := hsem₁
+    -- v₁ must be an integer
+    unfold valRel at hv₁
+    cases v₁ with
+    | litIntV n₁ =>
+      -- Apply semantic typing for e₂
+      specialize hsem₂ σ hctx
+      unfold exprRel at hsem₂
+      obtain ⟨v₂, heval₂, hv₂⟩ := hsem₂
+      -- v₂ must be an integer
+      unfold valRel at hv₂
+      cases v₂ with
+      | litIntV n₂ =>
+        -- Show that plus e₁ e₂ evaluates to n₁ + n₂
+        unfold exprRel
+        exists Val.litIntV (n₁ + n₂)
+        constructor
+        · simp [applySubst]
+          exact BigStep.plus heval₁ heval₂
+        · unfold valRel
+          trivial
+      | lamV _ _ => contradiction
+    | lamV _ _ => contradiction
+
+theorem fundamental {Γ : Context} {e : Expr} {A : Ty} :
+    (Γ ⊢ e : A) →
+    (Γ ⊨ e : A) := by
+  intro h
+  induction h with
+  | var hlookup =>
+    exact compat_var hlookup
+  | lam_named _ ih_sem =>
+    exact compatLamNamed ih_sem
+  | app _ _ ih_sem₁ ih_sem₂ =>
+    exact compatApp ih_sem₁ ih_sem₂
+  | litInt =>
+    exact compat_int
+  | plus _ _ ih_sem₁ ih_sem₂ =>
+    exact compatPlus ih_sem₁ ih_sem₂
+
+theorem termination {e : Expr} {A : Ty} :
+    (Context.empty ⊢ e : A) →
+    terminates e := by
+  intro htype
+  -- Apply fundamental theorem
+  have ⟨_, hsem⟩ := fundamental htype
+  -- Specialize with empty substitution
+  specialize hsem Subst.empty semContextRel.semContextRel_empty
+  -- The empty substitution applied to e gives e
+  rw [applySubst_empty] at hsem
+  -- hsem : ℰ⟦A⟧ e
+  unfold exprRel at hsem
+  -- Extract the value
+  obtain ⟨v, heval, _⟩ := hsem
+  unfold terminates
+  exists v
+
+theorem progress {e : Expr} {A : Ty} :
+    (Context.empty ⊢ e : A) →
+    (∃ v, e.toVal? = some v) ∨ (∃ v, e ⇓ v) := by
+  intro htype
+  have ⟨v, heval⟩ := termination htype
+  right
+  exists v
+
+end STLC
