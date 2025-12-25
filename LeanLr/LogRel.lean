@@ -180,46 +180,6 @@ theorem lookup_mem_dom {Γ : Context} {x : String} {A : Ty} :
     · -- x ≠ p.fst
       right; exact ih h
 
--- Helper: lookup in deleted context implies lookup in original
-theorem lookup_of_delete {Γ : Context} {x y : String} {A : Ty} :
-    x ≠ y → (Γ.delete y).lookup x = some A → Γ.lookup x = some A := by
-  -- intro hne
-  -- induction Γ with
-  -- | nil =>
-  --   intro h
-  --   simp [Context.delete, Context.lookup, List.filter] at h
-  -- | cons p Γ ih =>
-  --   intro hlookup
-  --   unfold Context.lookup at hlookup ⊢
-  --   simp only [List.lookup]
-  --   by_cases hp : p.1 = y
-  --   · -- p is filtered out: p.1 = y
-  --     rw [hp]
-  --     have : !decide (p.1 = p.1) = false := by simp
-  --     simp [List.filter, this] at hlookup
-  --     cases hbeq : (x == p.1)
-  --     · -- x ≠ p.1 (which is y)
-  --       have hne_xy : x ≠ p.1 := by
-  --         intro heq
-  --         subst heq
-  --         simp at hbeq
-  --       unfold Context.delete Context.lookup at ih
-  --       exact ih hlookup
-  --     · -- x = p.1 = y, contradiction with hne
-  --       have : x = p.1 := eq_of_beq hbeq
-  --       subst this hp
-  --       contradiction
-  --   · -- p is kept: p.1 ≠ y
-  --     have : !decide (p.1 = y) = true := by simp [hp]
-  --     simp [List.filter, this] at hlookup
-  --     cases hbeq : (x == p.1)
-  --     · -- x ≠ p.1
-  --       unfold Context.delete Context.lookup at ih
-  --       exact ih hlookup
-  --     · -- x = p.1
-  --       exact hlookup
-  sorry
-
 -- Helper: weakening for closed expressions
 theorem closed_weaken {X Y : List String} {e : Expr} :
     Expr.closed X e → (∀ x, x ∈ X → x ∈ Y) → Expr.closed Y e := by
@@ -251,33 +211,64 @@ theorem closed_weaken {X Y : List String} {e : Expr} :
 -- Helper: lookup in deleted subst
 theorem lookup_delete_ne {σ : Subst} {x y : String} :
     x ≠ y → (σ.delete y).lookup x = σ.lookup x := by
-  -- intro hne
-  -- induction σ with
-  -- | nil => rfl
-  -- | cons p σ ih =>
-  --   unfold Subst.delete Subst.lookup
-  --   simp only [List.lookup]
-  --   by_cases hp : p.1 = y
-  --   · -- p is filtered out: p.1 = y
-  --     rw [hp]
-  --     have : !decide (p.1 = p.1) = false := by simp
-  --     simp [List.filter, this]
-  --     cases hbeq : (x == p.1)
-  --     · -- x ≠ p.1 (which is y)
-  --       exact ih
-  --     · -- x = p.1 = y, contradiction
-  --       have : x = p.1 := eq_of_beq hbeq
-  --       subst this hp
-  --       contradiction
-  --   · -- p is kept: p.1 ≠ y
-  --     have : !decide (p.1 = y) = true := by simp [hp]
-  --     simp [List.filter, this]
-  --     cases hbeq : (x == p.1)
-  --     · -- x ≠ p.1
-  --       exact ih
-  --     · -- x = p.1
-  --       rfl
-  sorry
+  intro hne
+  induction σ with
+  | nil => rfl
+  | cons p σ ih =>
+    unfold Subst.delete Subst.lookup
+    simp only [List.lookup]
+    by_cases hp : p.1 = y
+    · -- p.1 = y, so p is filtered out
+      rw [List.filter_cons_of_neg]
+      · cases hbeq : (x == p.1)
+        · exact ih
+        · -- x = p.1, but p.1 = y and x ≠ y, contradiction
+          have : x = p.1 := eq_of_beq hbeq
+          subst this
+          contradiction
+      · simp [hp]
+    · -- p.1 ≠ y, so p is kept
+      rw [List.filter_cons_of_pos]
+      · simp only [List.lookup]
+        cases hbeq : (x == p.1)
+        · exact ih
+        · rfl
+      · simp [hp]
+
+-- Helper: lookup in deleted subst
+theorem context_lookup_delete_ne {Γ : Context} {x y : String} :
+    x ≠ y → (Γ.delete y).lookup x = Γ.lookup x := by
+  intro hne
+  induction Γ with
+  | nil => rfl
+  | cons p Γ ih =>
+    unfold Context.delete Context.lookup
+    simp only [List.lookup]
+    by_cases hp : p.1 = y
+    · -- p.1 = y, so p is filtered out
+      rw [List.filter_cons_of_neg]
+      · cases hbeq : (x == p.1)
+        · exact ih
+        · -- x = p.1, but p.1 = y and x ≠ y, contradiction
+          have : x = p.1 := eq_of_beq hbeq
+          subst this
+          contradiction
+      · simp [hp]
+    · -- p.1 ≠ y, so p is kept
+      rw [List.filter_cons_of_pos]
+      · simp only [List.lookup]
+        cases hbeq : (x == p.1)
+        · exact ih
+        · rfl
+      · simp [hp]
+
+-- Helper: lookup in deleted context implies lookup in original
+theorem lookup_of_delete {Γ : Context} {x y : String} {A : Ty} :
+    x ≠ y → (Γ.delete y).lookup x = some A → Γ.lookup x = some A := by
+  intro hne
+  intro hlookup
+  rw [context_lookup_delete_ne hne] at hlookup
+  exact hlookup
 
 -- Helper: semantic contexts are closed
 theorem semContextRel_closed {Γ : Context} {θ : Subst} :
