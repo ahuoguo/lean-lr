@@ -6,6 +6,9 @@ import LeanLr.ParallelSubst
 
 namespace STLC
 
+-- TODO: we might be able to just remove this? The mutual definition seems
+-- to have termination directly proven, unlike rocq
+
 -- Termination measure for mutual recursion: type size
 def Ty.size : Ty → Nat
   | Ty.int => 0
@@ -146,33 +149,6 @@ theorem lookup_mem_dom {Γ : Context} {x : String} {A : Ty} :
     · -- x ≠ p.fst
       right; exact ih h
 
--- Helper: weakening for closed expressions
-theorem closed_weaken {X Y : List String} {e : Expr} :
-    Expr.closed X e → (∀ x, x ∈ X → x ∈ Y) → Expr.closed Y e := by
-  intro hclosed hsub
-  induction e generalizing X Y with
-  | var x =>
-    simp [Expr.closed] at hclosed ⊢
-    exact hsub x hclosed
-  | lam b e ih =>
-    simp [Expr.closed] at hclosed ⊢
-    apply ih hclosed
-    intro z hz
-    cases b with
-    | anon => exact hsub z hz
-    | named y =>
-      simp [Binder.cons] at hz ⊢
-      cases hz with
-      | inl heq => left; exact heq
-      | inr hmem => right; exact hsub z hmem
-  | app e₁ e₂ ih₁ ih₂ =>
-    simp [Expr.closed, Bool.and_eq_true] at hclosed ⊢
-    exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 hsub⟩
-  | litInt n =>
-    simp [Expr.closed]
-  | plus e₁ e₂ ih₁ ih₂ =>
-    simp [Expr.closed, Bool.and_eq_true] at hclosed ⊢
-    exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 hsub⟩
 
 -- Helper: lookup in deleted subst
 theorem lookup_delete_ne {σ : Subst} {x y : String} :
@@ -369,10 +345,20 @@ theorem substClosed_weaken {X : List String} {σ : Subst} :
 --   closed [] (Lam x (subst_map (delete x θ) e)).
 -- Proof.
 theorem lamClosed Γ θ (x: String) A e :
-    Expr.closed (Context.dom (Context.insert Γ x A)) e →
+    e.closed ((Context.insert Γ x A).dom) →
     𝒢⟦Γ⟧ θ →
-    Expr.closed [] (Expr.lam (Binder.named x) (substMap (θ.delete x) e)) := by
-  sorry
+    -- TODO: `(λ x, (substMap (θ.delete x) e)).closed []` doesn't work here
+    -- the macro is slghtly fucked
+    (Expr.lam (Binder.named x) (substMap (θ.delete x) e)).closed [] := by
+  intro Hcl Hctxt
+  apply substMapClosed
+  · apply closed_weaken
+    · exact Hcl
+    · intro y
+      simp [Binder.cons]
+      sorry
+  · sorry
+
 
 -- Helper: element of filtered list is element of original list
 theorem mem_of_mem_filter {α : Type _} [DecidableEq α] {l : List α} {x : α} {p : α → Bool} :
@@ -456,7 +442,7 @@ theorem compatLamNamed {Γ : Context} {x : String} {e : Expr} {A B : Ty} :
 theorem compatApp {Γ : Context} {e₁ e₂ : Expr} {A B : Ty} :
     Γ ⊨ e₁ : (A ⇒ B) →
     Γ ⊨ e₂ : A →
-    Γ ⊨ Expr.app e₁ e₂ : B := by
+    Γ ⊨ e₁ e₂ : B := by
   intro ⟨hcl₁, hsem₁⟩ ⟨hcl₂, hsem₂⟩
   unfold semTyped
   constructor

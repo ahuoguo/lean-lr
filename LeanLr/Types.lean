@@ -29,6 +29,9 @@ def Context.delete (Γ : Context) (x : String) : Context :=
 def Context.insert (Γ : Context) (x : String) (A : Ty) : Context :=
   (x, A) :: Γ.delete x
 
+-- TODO: have the `(<[x:=A]> Γ)` notation
+
+
 def Context.lookup (Γ : Context) (x : String) : Option Ty :=
   List.lookup x Γ
 
