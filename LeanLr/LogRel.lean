@@ -2,6 +2,7 @@ import LeanLr.Lang
 import LeanLr.Types
 import LeanLr.Operational
 import LeanLr.Notation
+import LeanLr.ParallelSubst
 
 namespace STLC
 
@@ -32,44 +33,13 @@ end
 notation:50 "𝒱⟦" τ "⟧" v:50 => valRel τ v
 notation:50 "ℰ⟦" τ "⟧" e:50 => exprRel τ e
 
--- TODO: maybe switch to ExtTreeMap?
--- https://leanprover.zulipchat.com/#narrow/channel/490604-iris-lean/topic/stdpp/near/563551375
--- Finite map substitution (like gmap in Coq)
-abbrev Subst := List (String × Expr)
-
-def Subst.empty : Subst := []
-
-def Subst.delete (x : String) (σ : Subst) : Subst :=
-  σ.filter (fun p => p.1 ≠ x)
-
-def Subst.insert (x : String) (e : Expr) (σ : Subst) : Subst :=
-  (x, e) :: σ.delete x
-
-def Subst.lookup (σ : Subst) (x : String) : Option Expr :=
-  List.lookup x σ
-
-def Subst.dom (σ : Subst) : List String :=
-  σ.map (·.1)
-
--- Apply finite map substitution to expression
-def substMap (σ : Subst) : Expr → Expr
-  | Expr.var x => match List.lookup x σ with
-    | some e => e
-    | none => Expr.var x
-  | Expr.lam (Binder.named x) e =>
-      Expr.lam (Binder.named x) (substMap (σ.delete x) e)
-  | Expr.lam Binder.anon e => Expr.lam Binder.anon (substMap σ e)
-  | Expr.app e₁ e₂ => Expr.app (substMap σ e₁) (substMap σ e₂)
-  | Expr.litInt n => Expr.litInt n
-  | Expr.plus e₁ e₂ => Expr.plus (substMap σ e₁) (substMap σ e₂)
-
-
 -- Semantic typing for substitutions (environments)
 -- - All variables in Γ map to closed values
 -- - No extra bindings (domain matches)
 def substRel (Γ : Context) (σ : Subst) : Prop :=
   (∀ x A, Γ.lookup x = some A → ∃ v, σ.lookup x = some v.toExpr ∧ 𝒱⟦A⟧ v) ∧
   (∀ x e, σ.lookup x = some e → ∃ A, Γ.lookup x = some A)
+
 
 -- Inductive semContextRel : typing_context → (gmap string expr) → Prop :=
 --   | semContextRel_empty : semContextRel ∅ ∅
@@ -139,10 +109,6 @@ theorem semContextRel_dom {Γ : Context} {σ : Subst} :
     unfold Context.delete Subst.delete
     rw [map_fst_filter, ih]
     rw [← map_fst_filter]
-
--- Helper: applying empty substitution is identity
-theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
-  sorry
 
 -- Compatibility for integer literals
 theorem compat_int {Γ : Context} {n : Int} :
@@ -396,13 +362,6 @@ theorem substClosed_weaken {X : List String} {σ : Subst} :
   intros _ h
   cases h
 
--- Helper: substMap preserves closedness with the right context
-theorem substMap_closed {X : List String} {σ : Subst} {e : Expr} :
-    Expr.closed (X ++ σ.dom) e →
-    (∀ x e, σ.lookup x = some e → Expr.closed X e) →
-    Expr.closed X (substMap σ e) := by
-  sorry
-
 -- (* Compatibility for [lam] unfortunately needs a very technical helper lemma. *)
 -- Lemma lam_closed Γ θ (x : string) A e :
 --   closed (elements (dom (<[x:=A]> Γ))) e →
@@ -430,20 +389,6 @@ theorem mem_of_mem_filter {α : Type _} [DecidableEq α] {l : List α} {x : α} 
       · exact .tail _ (ih (by assumption))
     · -- p a = false
       exact .tail _ (ih h)
-
--- Helper: weakening for closed expressions
-
--- (** Lemma about the interaction with "normal" substitution. *)
--- Lemma subst_subst_map x es map e :
---   subst_closed [] map →
---   subst x es (subst_map (delete x map) e) =
---   subst_map (<[x:=es]> map) e.
-
--- Helper: composing substitutions
-theorem subst_substMap_compose {x : String} {v : Expr} {θ : Subst} {e : Expr} :
-    (∀ y e, θ.lookup y = some e → Expr.closed [] e) →
-    subst x v (substMap (θ.delete x) e) = substMap (Subst.insert x v θ) e := by
-  sorry
 
 -- Compatibility for lambda abstractions (named binder)
 theorem compatLamNamed {Γ : Context} {x : String} {e : Expr} {A B : Ty} :

@@ -29,11 +29,9 @@ def Context.delete (Γ : Context) (x : String) : Context :=
 def Context.insert (Γ : Context) (x : String) (A : Ty) : Context :=
   (x, A) :: Γ.delete x
 
--- Look up a variable in the context
 def Context.lookup (Γ : Context) (x : String) : Option Ty :=
   List.lookup x Γ
 
--- Domain of the context
 def Context.dom (Γ : Context) : List String :=
   Γ.map (·.1)
 
