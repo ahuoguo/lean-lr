@@ -149,34 +149,6 @@ theorem lookup_mem_dom {Γ : Context} {x : String} {A : Ty} :
     · -- x ≠ p.fst
       right; exact ih h
 
-
--- Helper: lookup in deleted subst
-theorem lookup_delete_ne {σ : Subst} {x y : String} :
-    x ≠ y → (σ.delete y).lookup x = σ.lookup x := by
-  intro hne
-  induction σ with
-  | nil => rfl
-  | cons p σ ih =>
-    unfold Subst.delete Subst.lookup
-    simp only [List.lookup]
-    by_cases hp : p.1 = y
-    · -- p.1 = y, so p is filtered out
-      rw [List.filter_cons_of_neg]
-      · cases hbeq : (x == p.1)
-        · exact ih
-        · -- x = p.1, but p.1 = y and x ≠ y, contradiction
-          have : x = p.1 := eq_of_beq hbeq
-          subst this
-          contradiction
-      · simp [hp]
-    · -- p.1 ≠ y, so p is kept
-      rw [List.filter_cons_of_pos]
-      · simp only [List.lookup]
-        cases hbeq : (x == p.1)
-        · exact ih
-        · rfl
-      · simp [hp]
-
 -- Helper: lookup in deleted subst
 theorem context_lookup_delete_ne {Γ : Context} {x y : String} :
     x ≠ y → (Γ.delete y).lookup x = Γ.lookup x := by
@@ -356,7 +328,14 @@ theorem lamClosed Γ θ (x: String) A e :
     · exact Hcl
     · intro y
       simp [Binder.cons]
-      sorry
+      intro Hy
+      by_cases hy : y = x
+      · left; exact hy
+      · right
+        unfold Context.insert Context.dom at Hy
+        -- TODO: prove that y ∈ (Γ.delete x.dom)
+        -- then use semContextRel_dom to relate context and subst doms
+        sorry
   · sorry
 
 

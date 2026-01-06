@@ -44,39 +44,6 @@ def substMap (σ : Subst) : Expr → Expr
   | Expr.litInt n => Expr.litInt n
   | Expr.plus e₁ e₂ => Expr.plus (substMap σ e₁) (substMap σ e₂)
 
--- Lemma subst_closed_weaken X Y map1 map2 :
---   Y ⊆ X → map1 ⊆ map2 → subst_closed Y map2 → subst_closed X map1.
--- Proof.
---   intros Hsub1 Hsub2 Hclosed2 x e Hl.
---   eapply closed_weaken. 1:eapply Hclosed2, map_subseteq_spec; done. done.
--- Qed.
-
-
--- Helper: applying empty substitution is identity
-theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
-  sorry
-
--- Lemma subst_map_closed'_2 X Θ e:
---   closed (X ++ (elements (dom Θ))) e ->
---   subst_closed X Θ ->
---   closed X (subst_map Θ e).
--- Proof.
-theorem substMapClosed {X : List String} {σ : Subst} {e : Expr} :
-    e.closed (X ++ σ.dom) →
-    σ.closed X →
-    (substMap σ e).closed X := by
-  sorry
-
--- Lemma about the interaction with "normal" substitution.
--- Lemma subst_subst_map x es map e :
---   subst_closed [] map →
---   subst x es (subst_map (delete x map) e) =
---   subst_map (<[x:=es]> map) e.
-theorem subst_substMap_compose {x : String} {es : Expr} {θ : Subst} {e : Expr} :
-    θ.closed [] →
-    subst x es (substMap (θ.delete x) e) = substMap (Subst.insert x es θ) e := by
-  sorry
-
 -- Helper: weakening for closed expressions
 theorem closed_weaken {X Y : List String} {e : Expr} :
     e.closed X → (∀ x, x ∈ X → x ∈ Y) → e.closed Y := by
@@ -98,24 +65,120 @@ theorem closed_weaken {X Y : List String} {e : Expr} :
       | inr hmem => right; exact hsub z hmem
   | app e₁ e₂ ih₁ ih₂ =>
     simp [Expr.closed, Bool.and_eq_true] at hclosed ⊢
-    exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 hsub⟩
+    constructor
+    · exact ih₁ hclosed.1 hsub
+    · exact ih₂ hclosed.2 hsub
   | litInt n =>
     simp [Expr.closed]
   | plus e₁ e₂ ih₁ ih₂ =>
     simp [Expr.closed, Bool.and_eq_true] at hclosed ⊢
-    exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 hsub⟩
+    constructor
+    · exact ih₁ hclosed.1 hsub
+    · exact ih₂ hclosed.2 hsub
 
+-- Helper: applying empty substitution is identity
+theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
+  induction e with
+  | var x => rfl
+  | lam b e ih =>
+    cases b with
+    | anon => simp [substMap, ih]
+    | named x =>
+      simp [substMap, Subst.delete, Subst.empty]
+      exact ih
+  | app e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
+  | litInt n => rfl
+  | plus e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
 
+-- Helper lemma for lookup in delete
+theorem lookup_delete_ne {σ : Subst} {x y : String} :
+    x ≠ y → (σ.delete y).lookup x = σ.lookup x := by
+  intro hne
+  induction σ with
+  | nil => rfl
+  | cons p σ ih =>
+    unfold Subst.delete Subst.lookup
+    simp only [List.lookup]
+    by_cases hp : p.1 = y
+    · -- p.1 = y, so p is filtered out
+      rw [List.filter_cons_of_neg]
+      · cases hbeq : (x == p.1)
+        · exact ih
+        · -- x = p.1, but p.1 = y and x ≠ y, contradiction
+          have : x = p.1 := eq_of_beq hbeq
+          subst this
+          contradiction
+      · simp [hp]
+    · -- p.1 ≠ y, so p is kept
+      rw [List.filter_cons_of_pos]
+      · simp only [List.lookup]
+        cases hbeq : (x == p.1)
+        · exact ih
+        · rfl
+      · simp [hp]
 
--- Lemma subst_closed_weaken X Y map1 map2 :
---   Y ⊆ X → map1 ⊆ map2 → subst_closed Y map2 → subst_closed X map1.
--- Proof.
---   intros Hsub1 Hsub2 Hclosed2 x e Hl.
---   eapply closed_weaken. 1:eapply Hclosed2, map_subseteq_spec; done. done.
--- Qed.
+theorem lookup_delete_eq {σ : Subst} {x : String} :
+    (σ.delete x).lookup x = none := by
+  induction σ with
+  | nil => rfl
+  | cons p σ ih =>
+    sorry
+
+theorem lookup_insert_eq {σ : Subst} {x : String} {e : Expr} :
+    (σ.insert x e).lookup x = some e := by
+  sorry
+
+theorem lookup_insert_ne {σ : Subst} {x y : String} {e : Expr} (h : x ≠ y) :
+    (σ.insert y e).lookup x = σ.lookup x := by
+  unfold Subst.insert Subst.lookup
+  simp only [List.lookup]
+  cases hbeq : (x == y)
+  · exact lookup_delete_ne h
+  · have : x = y := eq_of_beq hbeq
+    contradiction
+
+-- TODO: Complete this proof
+-- Corresponds to Coq's subst_closed_nil
+-- Issue: Lean's `subst` definition differs from Coq's in how it handles binders
+-- Strategy: May need to restructure the proof or adjust the definition
+-- See parallel_subst.v (this lemma is used but not shown in the file)
+theorem subst_closed_nil {x : String} {es : Expr} {e : Expr} :
+    e.closed [] = true → subst x es e = e := by
+  sorry
+
+-- TODO: Complete this proof
+-- Corresponds to Coq's subst_map_closed'_2
+-- Strategy: Induction on e, for variables show either lookup succeeds (giving closed expr)
+--           or lookup fails (so x must be in X). For lambdas, use IH with extended context.
+-- See parallel_subst.v lines 178-189
+theorem substMapClosed {X : List String} {σ : Subst} {e : Expr} :
+    e.closed (X ++ σ.dom) →
+    σ.closed X →
+    (substMap σ e).closed X := by
+  sorry
+
+-- TODO: Complete this proof
+-- Corresponds to Coq's subst_subst_map
+-- Key lemma showing interaction between normal substitution and parallel substitution
+-- Strategy: Induction on e. For vars, use delete/insert properties and subst_closed_nil.
+--           For lambdas, need to show delete/insert commute appropriately.
+-- Requires: subst_closed_nil to be completed first
+-- See parallel_subst.v lines 90-111
+theorem subst_substMap_compose {x : String} {es : Expr} {θ : Subst} {e : Expr} :
+    θ.closed [] →
+    subst x es (substMap (θ.delete x) e) = substMap (Subst.insert x es θ) e := by
+  sorry
+
+-- TODO: Complete this proof
+-- Corresponds to Coq's subst_closed_weaken
+-- Weakening lemma for closed substitutions
+-- Strategy: Use closed_weaken and properties of isSubSubstOf
+-- See parallel_subst.v lines 82-87
 theorem substClosedWeaken {X Y: List String} {σ1 σ2 : Subst} :
-  -- TODO: `σ1 ⊆ σ2` doesn't quite work
-  (Y ⊆ X) → (σ1.isSubSubstOf σ2) → σ2.closed Y → σ1.closed X
-  := sorry
+    (∀ x, x ∈ Y → x ∈ X) →
+    (σ1.isSubSubstOf σ2) →
+    σ2.closed Y →
+    σ1.closed X := by
+  sorry
 
 end STLC
