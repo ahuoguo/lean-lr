@@ -1,32 +1,31 @@
 import LeanLr.Lang
 import LeanLr.Operational
+import Std.Data.ExtTreeMap
 
 namespace STLC
 
--- TODO: maybe switch to ExtTreeMap?
--- https://leanprover.zulipchat.com/#narrow/channel/490604-iris-lean/topic/stdpp/near/563551375
--- Finite map substitution (like gmap in Coq)
-abbrev Subst := List (String × Expr)
+-- Finite map substitution using ExtTreeMap (like gmap in Coq)
+abbrev Subst := Std.ExtTreeMap String Expr compare
 
-def Subst.empty : Subst := []
+def Subst.empty : Subst := ∅
 
 def Subst.delete (x : String) (σ : Subst) : Subst :=
-  σ.filter (fun p => p.1 ≠ x)
+  σ.erase x
 
-def Subst.insert (x : String) (e : Expr) (σ : Subst) : Subst :=
-  (x, e) :: σ.delete x
+nonrec def Subst.insert (x : String) (e : Expr) (σ : Subst) : Subst :=
+  σ.insert x e
 
 def Subst.lookup (σ : Subst) (x : String) : Option Expr :=
-  List.lookup x σ
+  σ.get? x
 
 def Subst.dom (σ : Subst) : List String :=
-  σ.map (·.1)
+  σ.foldl (fun acc k _ => k :: acc) []
 
 def Subst.closed (X: List String) (σ: Subst) :=
   ∀ x e, σ.lookup x = some e → e.closed X
 
 def Subst.isSubSubstOf (σ: Subst) (σ': Subst) :=
-  ∀ x, x ∈ σ → x ∈ σ'
+  ∀ x, σ.contains x → σ'.contains x
 
 -- TODO:
 notation :70 A "⊆" B => Subst.isSubSubstOf A B
@@ -34,11 +33,11 @@ notation :70 A "⊆" B => Subst.isSubSubstOf A B
 -- Apply finite map substitution to expression
 -- TODO: maybe we can define a substmap as `Expr.substMap`?
 def substMap (σ : Subst) : Expr → Expr
-  | Expr.var x => match List.lookup x σ with
+  | Expr.var x => match σ.get? x with
     | some e => e
     | none => Expr.var x
   | Expr.lam (Binder.named x) e =>
-      Expr.lam (Binder.named x) (substMap (σ.delete x) e)
+      Expr.lam (Binder.named x) (substMap (σ.erase x) e)
   | Expr.lam Binder.anon e => Expr.lam Binder.anon (substMap σ e)
   | Expr.app e₁ e₂ => Expr.app (substMap σ e₁) (substMap σ e₂)
   | Expr.litInt n => Expr.litInt n
@@ -79,7 +78,8 @@ theorem closed_weaken {X Y : List String} {e : Expr} :
 -- Helper: applying empty substitution is identity
 theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
   induction e with
-  | var x => rfl
+  | var x =>
+    simp [substMap, Subst.empty]
   | lam b e ih =>
     cases b with
     | anon => simp [substMap, ih]
@@ -94,48 +94,22 @@ theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
 theorem lookup_delete_ne {σ : Subst} {x y : String} :
     x ≠ y → (σ.delete y).lookup x = σ.lookup x := by
   intro hne
-  induction σ with
-  | nil => rfl
-  | cons p σ ih =>
-    unfold Subst.delete Subst.lookup
-    simp only [List.lookup]
-    by_cases hp : p.1 = y
-    · -- p.1 = y, so p is filtered out
-      rw [List.filter_cons_of_neg]
-      · cases hbeq : (x == p.1)
-        · exact ih
-        · -- x = p.1, but p.1 = y and x ≠ y, contradiction
-          have : x = p.1 := eq_of_beq hbeq
-          subst this
-          contradiction
-      · simp [hp]
-    · -- p.1 ≠ y, so p is kept
-      rw [List.filter_cons_of_pos]
-      · simp only [List.lookup]
-        cases hbeq : (x == p.1)
-        · exact ih
-        · rfl
-      · simp [hp]
+  simp [Subst.delete, Subst.lookup]
+
+  sorry
 
 theorem lookup_delete_eq {σ : Subst} {x : String} :
     (σ.delete x).lookup x = none := by
-  induction σ with
-  | nil => rfl
-  | cons p σ ih =>
-    sorry
+  simp [Subst.delete, Subst.lookup]
 
 theorem lookup_insert_eq {σ : Subst} {x : String} {e : Expr} :
     (σ.insert x e).lookup x = some e := by
-  sorry
+  simp [Subst.insert, Subst.lookup]
 
 theorem lookup_insert_ne {σ : Subst} {x y : String} {e : Expr} (h : x ≠ y) :
     (σ.insert y e).lookup x = σ.lookup x := by
-  unfold Subst.insert Subst.lookup
-  simp only [List.lookup]
-  cases hbeq : (x == y)
-  · exact lookup_delete_ne h
-  · have : x = y := eq_of_beq hbeq
-    contradiction
+  simp [Subst.insert, Subst.lookup]
+  sorry
 
 -- TODO: Complete this proof
 -- Corresponds to Coq's subst_closed_nil

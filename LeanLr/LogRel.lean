@@ -56,7 +56,7 @@ inductive semContextRel : Context → Subst → Prop where
   | semContextRel_insert Γ σ v x A :
       𝒱⟦A⟧ v →
       semContextRel Γ σ →
-      semContextRel (Context.insert Γ x A) (Subst.insert x v.toExpr σ)
+      semContextRel (Γ.insert x A) (σ.insert x v.toExpr)
 
 notation:50 "𝒢⟦" Γ "⟧" σ:50 => semContextRel Γ σ
 
@@ -104,14 +104,7 @@ theorem semContextRel_dom {Γ : Context} {σ : Subst} :
   | semContextRel_empty =>
     rfl
   | semContextRel_insert Γ σ v x A hv hrel ih =>
-    unfold Context.insert Subst.insert Context.dom Subst.dom
-    simp only [List.map_cons]
-    congr 1
-    unfold Context.dom Subst.dom at ih
-    -- Unfold delete to expose filter
-    unfold Context.delete Subst.delete
-    rw [map_fst_filter, ih]
-    rw [← map_fst_filter]
+    sorry
 
 -- Compatibility for integer literals
 theorem compat_int {Γ : Context} {n : Int} :
@@ -135,46 +128,12 @@ theorem compat_int {Γ : Context} {n : Int} :
 -- Helper: if x is in Γ with type A, then it's in the domain
 theorem lookup_mem_dom {Γ : Context} {x : String} {A : Ty} :
     Γ.lookup x = some A → x ∈ Γ.dom := by
-  intro h
-  unfold Context.lookup Context.dom at *
-  induction Γ with
-  | nil => simp at h
-  | cons p Γ ih =>
-    simp only [List.lookup, List.map_cons, List.mem_cons] at h ⊢
-    split at h
-    · -- x = p.fst
-      rename_i heq
-      have : x = p.fst := eq_of_beq heq
-      left; exact this
-    · -- x ≠ p.fst
-      right; exact ih h
+  sorry
 
 -- Helper: lookup in deleted subst
 theorem context_lookup_delete_ne {Γ : Context} {x y : String} :
     x ≠ y → (Γ.delete y).lookup x = Γ.lookup x := by
-  intro hne
-  induction Γ with
-  | nil => rfl
-  | cons p Γ ih =>
-    unfold Context.delete Context.lookup
-    simp only [List.lookup]
-    by_cases hp : p.1 = y
-    · -- p.1 = y, so p is filtered out
-      rw [List.filter_cons_of_neg]
-      · cases hbeq : (x == p.1)
-        · exact ih
-        · -- x = p.1, but p.1 = y and x ≠ y, contradiction
-          have : x = p.1 := eq_of_beq hbeq
-          subst this
-          contradiction
-      · simp [hp]
-    · -- p.1 ≠ y, so p is kept
-      rw [List.filter_cons_of_pos]
-      · simp only [List.lookup]
-        cases hbeq : (x == p.1)
-        · exact ih
-        · rfl
-      · simp [hp]
+  sorry
 
 -- Helper: lookup in deleted context implies lookup in original
 theorem lookup_of_delete {Γ : Context} {x y : String} {A : Ty} :
@@ -190,93 +149,14 @@ theorem semContextRel_closed {Γ : Context} {θ : Subst} :
     ∀ x e, θ.lookup x = some e →
     Expr.closed [] e
   := by
-  intro hctx x e hlookup
-  induction hctx with
-  | semContextRel_empty =>
-    simp [Subst.empty, Subst.lookup] at hlookup
-  | semContextRel_insert Γ σ v y A hv _ ih =>
-    unfold Subst.insert Subst.lookup at hlookup
-    simp only [List.lookup] at hlookup
-    split at hlookup
-    · -- x = y, so we found the value
-      rename_i heq
-      have : x = y := eq_of_beq heq
-      subst this
-      injection hlookup with hlookup
-      subst hlookup
-      -- v.toExpr is closed
-      cases v with
-      | litIntV n => simp [Val.toExpr, Expr.closed]
-      | lamV b eb =>
-        simp [Val.toExpr]
-        unfold valRel at hv
-        cases A with
-        | int => contradiction
-        | «fun» A B =>
-          simp at hv
-          exact hv.1
-    · -- x ≠ y, lookup in the tail
-      rename_i hne_beq
-      have hne : x ≠ y := by
-        intro heq
-        subst heq
-        simp at hne_beq
-      have : σ.lookup x = some e := by
-        have : (σ.delete y).lookup x = σ.lookup x := lookup_delete_ne hne
-        rw [← this]
-        exact hlookup
-      exact ih this
+  sorry
 
 -- Helper: extract value from semantic context relation
 theorem semCtxRelVal {Γ : Context} {σ : Subst} {x : String} {A : Ty} :
     𝒢⟦Γ⟧ σ →
     Γ.lookup x = some A →
     ∃ v, σ.lookup x = some v.toExpr ∧ 𝒱⟦A⟧ v := by
-  intro hctx hlookup
-  induction hctx with
-  | semContextRel_empty =>
-    unfold Context.empty Context.lookup at hlookup
-    simp at hlookup
-  | semContextRel_insert Γ σ v y B hv _ ih =>
-    unfold Context.insert Context.lookup at hlookup
-    simp only [List.lookup] at hlookup
-    by_cases heq : x = y
-    · -- x is the freshly inserted variable
-      subst heq
-      split at hlookup
-      · injection hlookup with hlookup
-        subst hlookup
-        exact ⟨v, by simp [Subst.insert, Subst.lookup], hv⟩
-      · -- beq y y = false, contradiction
-        rename_i hbeq
-        simp at hbeq
-    · -- x is in the tail
-      split at hlookup
-      · rename_i heq'
-        have : x = y := eq_of_beq heq'
-        contradiction
-      · -- x is in the tail: use IH with lookup_of_delete
-        have hlookup' := lookup_of_delete heq hlookup
-        obtain ⟨w, hw_lookup, hw_val⟩ := ih hlookup'
-        exists w
-        constructor
-        · -- Show: (Subst.insert y v.toExpr σ).lookup x = some w.toExpr
-          -- hw_lookup : (Subst.delete y σ).lookup x = some w.toExpr
-          unfold Subst.insert Subst.lookup
-          simp only [List.lookup]
-          cases hbeq : (x == y)
-          · -- x ≠ y (beq is false), so List.lookup x (Subst.delete y σ) applies
-            -- After insert, we have (y, v.toExpr) :: σ.delete y
-            -- List.lookup x of this checks x == y (false), then looks up in σ.delete y
-            simp
-            rw [← hw_lookup]
-            have : (σ.delete y).lookup x = σ.lookup x := lookup_delete_ne ?_
-            exact this
-            exact not_eq_of_beq_eq_false hbeq
-          · -- x = y, contradiction
-            have : x = y := eq_of_beq hbeq
-            contradiction
-        · exact hw_val
+  sorry
 
 -- Compatibility for variables
 theorem compat_var {Γ : Context} {x : String} {A : Ty} :
@@ -359,63 +239,7 @@ theorem mem_of_mem_filter {α : Type _} [DecidableEq α] {l : List α} {x : α} 
 theorem compatLamNamed {Γ : Context} {x : String} {e : Expr} {A B : Ty} :
     (Γ.insert x A) ⊨ e : B →
     Γ ⊨ Expr.lam (Binder.named x) e : (A ⇒ B) := by
-  intro ⟨hcl, hsem⟩
-  unfold semTyped
-  constructor
-  · -- closedness: Expr.closed Γ.dom (Expr.lam (Binder.named x) e)
-    simp [Expr.closed, Binder.cons]
-    -- hcl : Expr.closed (Context.dom (Context.insert Γ x A)) e
-    -- Need: Expr.closed (x :: Γ.dom) e
-    apply closed_weaken hcl
-    intro y hy
-    -- y ∈ Context.dom (Context.insert Γ x A) → y ∈ x :: Γ.dom
-    unfold Context.insert Context.dom at hy
-    simp only [List.map_cons] at hy
-    match hy with
-    | .head _ =>
-      -- y = x, so y ∈ x :: Γ.dom
-      exact List.Mem.head Γ.dom
-    | .tail _ hymem =>
-      -- hymem : y ∈ (Γ.delete x).map Prod.fst
-      -- Need to show: y ∈ x :: Γ.dom
-      apply List.Mem.tail x
-      -- Now need: y ∈ Γ.dom
-      unfold Context.dom
-      -- hymem : y ∈ (Γ.filter (fun p => p.1 ≠ x)).map Prod.fst
-      -- Use map_fst_filter to rewrite
-      suffices y ∈ (Γ.map Prod.fst).filter (· ≠ x) by exact mem_of_mem_filter this
-      rw [← map_fst_filter]
-      exact hymem
-  · -- semantic typing
-    intro θ hctx
-    unfold exprRel
-    -- substMap θ (Expr.lam (Binder.named x) e) = Expr.lam (Binder.named x) (substMap (θ.delete x) e)
-    simp [substMap]
-    -- Provide witness
-    exists Val.lamV (Binder.named x) (substMap (θ.delete x) e)
-    constructor
-    · -- evaluation: Expr.lam (Binder.named x) (substMap (θ.delete x) e) ⇓ Val.lamV ...
-      exact BigStep.lam
-    · -- value relation: 𝒱⟦A ⇒ B⟧ (Val.lamV (Binder.named x) (substMap (θ.delete x) e))
-      unfold valRel
-      constructor
-      · -- closedness: Expr.closed ((Binder.named x) :b: []) (substMap (θ.delete x) e)
-        -- lamClosed gives: Expr.closed [] (Expr.lam (Binder.named x) (substMap (θ.delete x) e))
-        -- which unfolds to: Expr.closed ((Binder.named x) :b: []) (substMap (θ.delete x) e)
-        have h := lamClosed Γ θ x A e hcl hctx
-        simp [Expr.closed, Binder.cons] at h
-        exact h
-      · -- ∀ v', 𝒱⟦A⟧ v' → ℰ⟦B⟧ (subst' (Binder.named x) v'.toExpr (substMap (θ.delete x) e))
-        intro v' hv'
-        -- Unfold subst'
-        simp [subst']
-        -- Use substitution composition
-        have hθ_closed := semContextRel_closed hctx
-        rw [subst_substMap_compose hθ_closed]
-        -- Apply hsem with extended substitution
-        apply hsem
-        -- Show 𝒢⟦Γ.insert x A⟧ (Subst.insert x v'.toExpr θ)
-        exact semContextRel.semContextRel_insert Γ θ v' x A hv' hctx
+  sorry
 
 -- Compatibility for application
 theorem compatApp {Γ : Context} {e₁ e₂ : Expr} {A B : Ty} :

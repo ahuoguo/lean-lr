@@ -4,7 +4,7 @@
 -/
 
 import LeanLr.Lang
-import Std.Data.HashMap
+import Std.Data.ExtTreeMap
 import LeanLr.Notation
 
 namespace STLC
@@ -18,25 +18,25 @@ inductive Ty where
 -- Notation for function types
 infixr:70 " ⇒ " => Ty.fun
 
--- TODO: easier representation as gmap? Also see comment for Subst
-def Context := List (String × Ty)
+-- Typing context using ExtTreeMap (like gmap in Coq)
+abbrev Context := Std.ExtTreeMap String Ty compare
 
-def Context.empty : Context := []
+def Context.empty : Context := ∅
 
 def Context.delete (Γ : Context) (x : String) : Context :=
-  Γ.filter (fun p => p.1 ≠ x)
+  Γ.erase x
 
 def Context.insert (Γ : Context) (x : String) (A : Ty) : Context :=
-  (x, A) :: Γ.delete x
+  (Γ.erase x).insert x A
 
 -- TODO: have the `(<[x:=A]> Γ)` notation
 
 
 def Context.lookup (Γ : Context) (x : String) : Option Ty :=
-  List.lookup x Γ
+  Γ.get? x
 
 def Context.dom (Γ : Context) : List String :=
-  Γ.map (·.1)
+  Γ.foldl (fun acc k _ => k :: acc) []
 
 inductive SynTyped : Context → Expr → Ty → Prop where
   | var : ∀ {Γ x A},
