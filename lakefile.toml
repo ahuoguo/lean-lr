@@ -8,3 +8,9 @@ name = "LeanLr"
 [[lean_exe]]
 name = "lean-lr"
 root = "Main"
+
+
+[[require]]
+name = "Iris"
+git = "https://github.com/lzy0505/iris-lean.git"
+rev = "big_op_map/set"

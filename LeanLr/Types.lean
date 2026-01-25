@@ -7,8 +7,15 @@ import LeanLr.Lang
 import Std.Data.ExtTreeMap
 import LeanLr.Notation
 
-namespace STLC
+import Iris.Std.FiniteMap
+import Iris.Std.FiniteMapInst
+import Iris.Std.FiniteSet
+import Iris.Std.FiniteSetInst
+import Iris.Std.FiniteMapDom
 
+open Iris.Std
+
+namespace STLC
 -- Types in STLC
 inductive Ty where
   | int : Ty
@@ -18,25 +25,41 @@ inductive Ty where
 -- Notation for function types
 infixr:70 " ⇒ " => Ty.fun
 
--- Typing context using ExtTreeMap (like gmap in Coq)
+-- Typing context using FiniteMap interface (like gmap in Coq)
+-- The underlying implementation is ExtTreeMap, but we use the abstract interface
 abbrev Context := Std.ExtTreeMap String Ty compare
 
-def Context.empty : Context := ∅
+-- Type alias for the FiniteMap instance type
+abbrev CtxMap := Std.ExtTreeMap String
+
+abbrev StringSet := Std.TreeSet String compare
+
+-- Use FiniteMap operations for Context
+-- We use the FiniteMap instance for Std.ExtTreeMap
+
+def Context.empty : Context :=
+  (FiniteMap.empty : CtxMap Ty)
 
 def Context.delete (Γ : Context) (x : String) : Context :=
-  Γ.erase x
+  (FiniteMap.delete Γ x : CtxMap Ty)
 
 def Context.insert (Γ : Context) (x : String) (A : Ty) : Context :=
-  (Γ.erase x).insert x A
+  (FiniteMap.insert (FiniteMap.delete Γ x : CtxMap Ty) x A : CtxMap Ty)
 
--- TODO: have the `(<[x:=A]> Γ)` notation
-
+-- TODO: have the `(<[x:=A]> Γ)` notation ≠
+notation:90 Γ " <[ " x " := " A " ]> " => Context.insert Γ x A
 
 def Context.lookup (Γ : Context) (x : String) : Option Ty :=
-  Γ.get? x
+  FiniteMap.get? (M := CtxMap) Γ x
 
-def Context.dom (Γ : Context) : List String :=
-  Γ.foldl (fun acc k _ => k :: acc) []
+-- Return domain as a List (for compatibility with proofs using List operations)
+def Context.domList (Γ : Context) : List String :=
+  (FiniteMap.toList (M := CtxMap) Γ).map Prod.fst
+
+-- Return domain as a FiniteSet (default) using FiniteMapDom
+def Context.dom (Γ : Context) : StringSet :=
+  domSet (M := CtxMap) (S := StringSet) Γ
+
 
 inductive SynTyped : Context → Expr → Ty → Prop where
   | var : ∀ {Γ x A},

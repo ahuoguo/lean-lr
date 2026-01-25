@@ -62,7 +62,7 @@ notation:50 "𝒢⟦" Γ "⟧" σ:50 => semContextRel Γ σ
 
 -- Semantic typing judgment: Γ ⊨ e : τ
 def semTyped (Γ : Context) (e : Expr) (τ : Ty) : Prop :=
-  Expr.closed Γ.dom e ∧
+  Expr.closed Γ.domList e ∧
   ∀ σ: Subst, 𝒢⟦Γ⟧ σ → ℰ⟦τ⟧ (substMap σ e)
 
 notation:75 Γ:75 " ⊨ " e:74 " : " τ:74 => semTyped Γ e τ
@@ -102,9 +102,15 @@ theorem semContextRel_dom {Γ : Context} {σ : Subst} :
   intro hctx
   induction hctx with
   | semContextRel_empty =>
-    rfl
+    simp [Context.dom, Subst.dom]
+    apply Iris.Std.domSet_empty
   | semContextRel_insert Γ σ v x A hv hrel ih =>
+    simp [Context.dom, Subst.dom]
+    -- TODO: need to wait for domSet_insert, which i think you need some
+    -- SemiSet axioms which are not ported yet...
+    -- rw [Iris.Std.domSet_insert]
     sorry
+
 
 -- Compatibility for integer literals
 theorem compat_int {Γ : Context} {n : Int} :
@@ -125,15 +131,53 @@ theorem compat_int {Γ : Context} {n : Int} :
       unfold valRel
       trivial
 
+-- Helper: membership in domList iff lookup succeeds
+theorem mem_domList_iff_lookup_ctx {σ : Context} {x : String} :
+    x ∈ σ.domList ↔ ∃ e, σ.lookup x = some e := by
+  simp only [Context.domList, Context.lookup]
+  rw [List.mem_map]
+  constructor
+  · intro ⟨⟨k, v⟩, hmem', heq⟩
+    simp at heq
+    subst heq
+    have h := (Iris.Std.FiniteMapLaws.elem_of_map_to_list (M := CtxMap) (K := String) (V := Ty) σ k v).mp hmem'
+    exact ⟨v, h⟩
+  · intro ⟨e, he⟩
+    have hmem : (x, e) ∈ (Iris.Std.FiniteMap.toList (M := CtxMap) σ) :=
+      (Iris.Std.FiniteMapLaws.elem_of_map_to_list (M := CtxMap) (K := String) (V := Ty) σ x e).mpr he
+    exact ⟨(x, e), hmem, rfl⟩
+
+-- Helper: membership in dom (FiniteSet) iff lookup succeeds
+-- Uses elem_of_domSet from FiniteMapDom
+theorem subst_mem_dom_iff_lookup {σ : Context} {x : String} :
+    x ∈ σ.dom ↔ ∃ e, σ.lookup x = some e := by
+  simp only [Context.dom, Context.lookup]
+  -- Work around membership instance mismatch by unfolding domSet and FiniteSet.ofList
+  simp only [Iris.Std.domSet, Iris.Std.FiniteSet.ofList]
+  rw [Std.TreeSet.mem_ofList, List.contains_iff_mem]
+  exact mem_domList_iff_lookup_ctx
+
 -- Helper: if x is in Γ with type A, then it's in the domain
 theorem lookup_mem_dom {Γ : Context} {x : String} {A : Ty} :
     Γ.lookup x = some A → x ∈ Γ.dom := by
-  sorry
+  intro hlookup
+  rw [subst_mem_dom_iff_lookup]
+  exists A
 
--- Helper: lookup in deleted subst
+-- Helper: if x is in Γ with type A, then it's in the domList
+theorem lookup_mem_domList {Γ : Context} {x : String} {A : Ty} :
+    Γ.lookup x = some A → x ∈ Γ.domList := by
+  intro hlookup
+  rw [mem_domList_iff_lookup_ctx]
+  exists A
+
+
+-- Helper: lookup in deleted context
 theorem context_lookup_delete_ne {Γ : Context} {x y : String} :
     x ≠ y → (Γ.delete y).lookup x = Γ.lookup x := by
-  sorry
+  intro hne
+  simp only [Context.delete, Context.lookup]
+  exact Iris.Std.FiniteMapLaws.lookup_delete_ne (M := CtxMap) (K := String) (V := Ty) Γ y x hne.symm
 
 -- Helper: lookup in deleted context implies lookup in original
 theorem lookup_of_delete {Γ : Context} {x y : String} {A : Ty} :
@@ -167,14 +211,13 @@ theorem compat_var {Γ : Context} {x : String} {A : Ty} :
   constructor
   · -- closedness
     simp [Expr.closed]
-    exact lookup_mem_dom hlookup
+    exact lookup_mem_domList hlookup
   · -- semantic typing
     intro σ hctx
     -- Extract the value from the semantic context
     obtain ⟨v, hσ, hv⟩ := semCtxRelVal hctx hlookup
     -- Apply substitution to var x
     unfold substMap
-    unfold Subst.lookup at hσ
     simp only [hσ]
     -- Show v.toExpr ∈ ℰ⟦A⟧
     exact val_inclusion hv
@@ -197,7 +240,7 @@ theorem substClosed_weaken {X : List String} {σ : Subst} :
 --   closed [] (Lam x (subst_map (delete x θ) e)).
 -- Proof.
 theorem lamClosed Γ θ (x: String) A e :
-    e.closed ((Context.insert Γ x A).dom) →
+    e.closed ((Context.insert Γ x A).domList) →
     𝒢⟦Γ⟧ θ →
     -- TODO: `(λ x, (substMap (θ.delete x) e)).closed []` doesn't work here
     -- the macro is slghtly fucked
@@ -212,8 +255,8 @@ theorem lamClosed Γ θ (x: String) A e :
       by_cases hy : y = x
       · left; exact hy
       · right
-        unfold Context.insert Context.dom at Hy
-        -- TODO: prove that y ∈ (Γ.delete x.dom)
+        unfold Context.insert Context.domList at Hy
+        -- TODO: prove that y ∈ (Γ.delete x.domList)
         -- then use semContextRel_dom to relate context and subst doms
         sorry
   · sorry
