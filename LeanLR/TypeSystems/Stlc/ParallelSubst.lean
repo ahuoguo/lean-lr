@@ -1,6 +1,6 @@
-import LeanLr.Lang
-import LeanLr.Operational
-import LeanLr.Types
+import LeanLR.TypeSystems.Stlc.Lang
+import LeanLR.TypeSystems.Stlc.Operational
+import LeanLR.TypeSystems.Stlc.Types
 
 import Iris.Std.PartialMap
 import Iris.Std.GenSets

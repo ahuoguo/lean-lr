@@ -3,8 +3,8 @@
   Defines types, typing contexts, and typing judgments
 -/
 
-import LeanLr.Lang
-import LeanLr.Notation
+import LeanLR.TypeSystems.Stlc.Lang
+import LeanLR.TypeSystems.Stlc.Notation
 
 import Iris.Std.PartialMap
 import Iris.Std.GenSets

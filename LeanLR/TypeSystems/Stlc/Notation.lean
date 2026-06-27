@@ -2,7 +2,7 @@
   STLC notation for cleaner syntax
 -/
 
-import LeanLr.Lang
+import LeanLR.TypeSystems.Stlc.Lang
 import Lean
 
 namespace STLC

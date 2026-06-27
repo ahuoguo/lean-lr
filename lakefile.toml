@@ -3,7 +3,7 @@ version = "0.1.0"
 defaultTargets = ["lean-lr"]
 
 [[lean_lib]]
-name = "LeanLr"
+name = "LeanLR"
 
 [[lean_exe]]
 name = "lean-lr"

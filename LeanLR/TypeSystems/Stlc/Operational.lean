@@ -1,4 +1,4 @@
-import LeanLr.Lang
+import LeanLR.TypeSystems.Stlc.Lang
 
 namespace STLC
 

@@ -1,8 +1,8 @@
-import LeanLr.Lang
-import LeanLr.Types
-import LeanLr.Operational
-import LeanLr.Notation
-import LeanLr.ParallelSubst
+import LeanLR.TypeSystems.Stlc.Lang
+import LeanLR.TypeSystems.Stlc.Types
+import LeanLR.TypeSystems.Stlc.Operational
+import LeanLR.TypeSystems.Stlc.Notation
+import LeanLR.TypeSystems.Stlc.ParallelSubst
 
 import Iris.Std.PartialMap
 import Iris.Std.GenSets
