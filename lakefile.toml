@@ -9,8 +9,8 @@ name = "LeanLr"
 name = "lean-lr"
 root = "Main"
 
-
 [[require]]
-name = "Iris"
-git = "https://github.com/lzy0505/iris-lean.git"
-rev = "big_op_map/set"
+name = "iris"
+git = "https://github.com/leanprover-community/iris-lean"
+rev = "master"
+subDir = "Iris"

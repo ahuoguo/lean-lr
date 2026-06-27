@@ -1,60 +1,45 @@
 import LeanLr.Lang
 import LeanLr.Operational
 import LeanLr.Types
-import Std.Data.ExtTreeMap
 
-import Iris.Std.FiniteMap
-import Iris.Std.FiniteMapInst
-import Iris.Std.FiniteSet
-import Iris.Std.FiniteSetInst
+import Iris.Std.PartialMap
+import Iris.Std.GenSets
+import Iris.Std.GenSetsInstances
+import Iris.Std.HeapInstances
 
 open Iris.Std
 
 namespace STLC
 
--- Finite map substitution using FiniteMap interface (like gmap in Coq)
--- The underlying implementation is ExtTreeMap, but we use the abstract interface
-abbrev Subst := Std.ExtTreeMap String Expr compare
+-- Parallel substitution map (like gmap string expr in Coq)
+abbrev Subst := MapStr Expr
 
--- Type alias for the FiniteMap instance type
-abbrev SubstMap := Std.ExtTreeMap String
-
-def Subst.empty : Subst :=
-  (FiniteMap.empty : SubstMap Expr)
+def Subst.empty : Subst := PartialMap.empty (M := MapStr) (V := Expr)
 
 def Subst.delete (x : String) (σ : Subst) : Subst :=
-  (FiniteMap.delete σ x : SubstMap Expr)
+  Iris.Std.delete (M := MapStr) σ x
 
 nonrec def Subst.insert (x : String) (e : Expr) (σ : Subst) : Subst :=
-  (FiniteMap.insert σ x e : SubstMap Expr)
+  Iris.Std.insert (M := MapStr) σ x e
 
 def Subst.lookup (σ : Subst) (x : String) : Option Expr :=
-  FiniteMap.get? (M := SubstMap) σ x
+  Iris.Std.get? (M := MapStr) σ x
 
--- Return domain as a List (for compatibility with proofs using List operations)
 def Subst.domList (σ : Subst) : List String :=
-  (FiniteMap.toList (M := SubstMap) σ).map Prod.fst
+  (FiniteMap.toList (M := MapStr) σ).map Prod.fst
 
--- Return domain as a FiniteSet (default) using FiniteMapDom
 def Subst.dom (σ : Subst) : StringSet :=
-  domSet (M := SubstMap) (S := StringSet) σ
+  FiniteMap.dom_set (M := MapStr) σ
 
 def Subst.closed (X: List String) (σ: Subst) :=
   ∀ x e, σ.lookup x = some e → e.closed X
 
--- Check if key is in substitution using FiniteMap membership
 def Subst.mem (σ : Subst) (x : String) : Bool :=
   (Subst.lookup σ x).isSome
 
-def Subst.isSubSubstOf (σ: Subst) (σ': Subst) :=
-  ∀ x, σ.mem x → σ'.mem x
-
--- TODO:
-notation :70 A "⊆" B => Subst.isSubSubstOf A B
 notation:90 σ " <[ " x " := " e " ]> " => Subst.insert x e σ
 
--- Apply finite map substitution to expression
--- Using FiniteMap operations
+-- Apply parallel substitution to expression
 def substMap (σ : Subst) : Expr → Expr
   | Expr.var x => match Subst.lookup σ x with
     | some e => e
@@ -65,6 +50,12 @@ def substMap (σ : Subst) : Expr → Expr
   | Expr.app e₁ e₂ => Expr.app (substMap σ e₁) (substMap σ e₂)
   | Expr.litInt n => Expr.litInt n
   | Expr.plus e₁ e₂ => Expr.plus (substMap σ e₁) (substMap σ e₂)
+
+-- Helper: two subst maps with same get? are equal
+private theorem subst_ext {σ₁ σ₂ : Subst}
+    (h : ∀ k, Iris.Std.get? (M := MapStr) σ₁ k = Iris.Std.get? (M := MapStr) σ₂ k) :
+    σ₁ = σ₂ :=
+  ExtensionalPartialMap.equiv_iff_eq.mp h
 
 -- Helper: weakening for closed expressions
 theorem closed_weaken {X Y : List String} {e : Expr} :
@@ -101,15 +92,21 @@ theorem closed_weaken {X Y : List String} {e : Expr} :
 -- Helper: deleting from empty gives empty
 theorem delete_empty (x : String) : Subst.delete x Subst.empty = Subst.empty := by
   simp only [Subst.delete, Subst.empty]
-  exact FiniteMapLaws.delete_empty' (M := SubstMap) (K := String) (V := Expr) x
+  apply subst_ext
+  intro k
+  have hempty : Iris.Std.get? (M := MapStr) (PartialMap.empty (M := MapStr) (V := Expr)) k = none :=
+    LawfulPartialMap.get?_empty (M := MapStr) k
+  by_cases heq : x = k
+  · simp [LawfulPartialMap.get?_delete_eq (M := MapStr) heq, hempty]
+  · simp [LawfulPartialMap.get?_delete_ne (M := MapStr) heq, hempty]
 
 -- Helper: applying empty substitution is identity
 theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
   induction e with
   | var x =>
     simp only [substMap, Subst.empty, Subst.lookup]
-    have h : FiniteMap.get? (M := SubstMap) (FiniteMap.empty : SubstMap Expr) x = none :=
-      FiniteMapLaws.lookup_empty (M := SubstMap) (K := String) (V := Expr) x
+    have h : Iris.Std.get? (M := MapStr) (PartialMap.empty (M := MapStr) (V := Expr)) x = none :=
+      LawfulPartialMap.get?_empty (M := MapStr) x
     simp [h]
   | lam b e ih =>
     cases b with
@@ -122,25 +119,24 @@ theorem substMap_empty (e : Expr) : substMap Subst.empty e = e := by
   | litInt n => rfl
   | plus e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
 
--- Helper lemma for lookup in delete - using FiniteMapLaws
+-- Helper lemma for lookup in delete
 theorem lookup_delete_ne {σ : Subst} {x y : String} :
     x ≠ y → (Subst.delete y σ).lookup x = σ.lookup x := by
   intro hne
   simp only [Subst.delete, Subst.lookup]
-  exact FiniteMapLaws.lookup_delete_ne (M := SubstMap) (K := String) (V := Expr) σ y x hne.symm
+  exact LawfulPartialMap.get?_delete_ne (M := MapStr) hne.symm
 
 theorem lookup_delete_eq {σ : Subst} {x : String} :
     (Subst.delete x σ).lookup x = none := by
   simp only [Subst.delete, Subst.lookup]
-  exact FiniteMapLaws.lookup_delete_eq (M := SubstMap) (K := String) (V := Expr) σ x
+  exact LawfulPartialMap.get?_delete_eq (M := MapStr) rfl
 
 -- Helper: closed is preserved by weakening the context
 theorem Subst.closed_weaken {X Y : List String} {σ : Subst} :
     (∀ x, x ∈ X → x ∈ Y) → σ.closed X → σ.closed Y := by
   intro hsub hclosed x e hlookup
   have hcl := hclosed x e hlookup
-  have : e.closed Y := STLC.closed_weaken hcl hsub
-  exact this
+  exact STLC.closed_weaken hcl hsub
 
 -- Helper: deleting preserves closedness with weaker context
 theorem Subst.closed_delete_weaken {X : List String} {σ : Subst} {x : String} :
@@ -156,11 +152,9 @@ theorem Subst.closed_delete_weaken {X : List String} {σ : Subst} {x : String} :
     rw [← lookup_delete_ne hne]
     exact hlookup
   have hcl := hclosed y e this
-  have : e.closed (x :: X) := STLC.closed_weaken hcl (fun z hz => List.Mem.tail x hz)
-  exact this
+  exact STLC.closed_weaken hcl (fun z hz => List.Mem.tail x hz)
 
 -- Helper: membership in domList corresponds to successful lookup
--- This relates the list-based domList to the map's lookup function
 theorem mem_domList_iff_lookup {σ : Subst} {x : String} :
     x ∈ Subst.domList σ ↔ ∃ e, Subst.lookup σ x = some e := by
   simp only [Subst.domList, Subst.lookup]
@@ -169,11 +163,11 @@ theorem mem_domList_iff_lookup {σ : Subst} {x : String} :
   · intro ⟨⟨k, v⟩, hmem', heq⟩
     simp at heq
     subst heq
-    have h := (FiniteMapLaws.elem_of_map_to_list (M := SubstMap) (K := String) (V := Expr) σ k v).mp hmem'
+    have h := (LawfulFiniteMap.toList_get (M := MapStr) (K := String)).mp hmem'
     exact ⟨v, h⟩
   · intro ⟨e, he⟩
-    have hmem : (x, e) ∈ (FiniteMap.toList (M := SubstMap) σ) :=
-      (FiniteMapLaws.elem_of_map_to_list (M := SubstMap) (K := String) (V := Expr) σ x e).mpr he
+    have hmem : (x, e) ∈ (FiniteMap.toList (M := MapStr) σ) :=
+      (LawfulFiniteMap.toList_get (M := MapStr) (K := String)).mpr he
     exact ⟨(x, e), hmem, rfl⟩
 
 -- Helper: if y is in σ.domList and y ≠ x, then y is in (σ.delete x).domList
@@ -186,22 +180,15 @@ theorem mem_domList_delete {σ : Subst} {x y : String} :
   rw [lookup_delete_ne hne]
   exact he
 
--- Helper: delete operations commute when deleting different keys
-theorem delete_delete_comm {σ : Subst} {x y : String} :
-    x ≠ y → Subst.delete x (Subst.delete y σ) = Subst.delete y (Subst.delete x σ) := by
-  intro _
-  simp only [Subst.delete]
-  exact FiniteMapLaws.delete_delete (M := SubstMap) (K := String) (V := Expr) σ y x
-
 theorem lookup_insert_eq {σ : Subst} {x : String} {e : Expr} :
     (Subst.insert x e σ).lookup x = some e := by
   simp only [Subst.insert, Subst.lookup]
-  exact FiniteMapLaws.lookup_insert_eq (M := SubstMap) (K := String) (V := Expr) σ x e
+  exact LawfulPartialMap.get?_insert_eq (M := MapStr) rfl
 
 theorem lookup_insert_ne {σ : Subst} {x y : String} {e : Expr} (h : x ≠ y) :
     (Subst.insert y e σ).lookup x = σ.lookup x := by
   simp only [Subst.insert, Subst.lookup]
-  exact FiniteMapLaws.lookup_insert_ne (M := SubstMap) (K := String) (V := Expr) σ y x e h.symm
+  exact LawfulPartialMap.get?_insert_ne (M := MapStr) h.symm
 
 -- Helper: if x is not in the closed set, substitution doesn't change the expression
 theorem subst_closed_notmem {x : String} {es : Expr} {e : Expr} {X : List String} :
@@ -239,22 +226,13 @@ theorem subst_closed_notmem {x : String} {es : Expr} {e : Expr} {X : List String
     · exact ih₁ hclosed.1 hnotmem
     · exact ih₂ hclosed.2 hnotmem
 
--- TODO: Complete this proof
--- Corresponds to Coq's subst_closed_nil
--- Issue: Lean's `subst` definition differs from Coq's in how it handles binders
--- Strategy: May need to restructure the proof or adjust the definition
--- See parallel_subst.v (this lemma is used but not shown in the file)
 theorem subst_closed_nil {x : String} {es : Expr} {e : Expr} :
     e.closed [] = true → subst x es e = e := by
   intro hclosed
   apply subst_closed_notmem hclosed
   simp
 
--- TODO: Complete this proof
--- Corresponds to Coq's subst_map_closed'_2
--- Strategy: Induction on e, for variables show either lookup succeeds (giving closed expr)
---           or lookup fails (so x must be in X). For lambdas, use IH with extended context.
--- See parallel_subst.v lines 178-189
+-- Key lemma: substMap preserves closedness
 theorem substMapClosed {X : List String} {σ : Subst} {e : Expr} :
     e.closed (X ++ σ.domList) →
     σ.closed X →
@@ -281,35 +259,29 @@ theorem substMapClosed {X : List String} {σ : Subst} {e : Expr} :
     | named y =>
       simp [substMap, Expr.closed, Binder.cons] at hclosed ⊢
       apply ih
-      · -- Show e'.closed ((y :: X) ++ (σ.delete y).domList)
-        apply closed_weaken hclosed
+      · apply closed_weaken hclosed
         intro z hz
         cases hz with
         | head =>
-          -- z = y
           rw [List.mem_append]
           left
           apply List.Mem.head
         | tail _ hrest =>
-          -- z ∈ X ++ σ.domList
           have : z ∈ X ∨ z ∈ σ.domList := List.mem_append.mp hrest
           rw [List.mem_append]
           cases this with
           | inl hx =>
-            -- z ∈ X
             left
             apply List.Mem.tail
             exact hx
           | inr hdom =>
-            -- z ∈ σ.domList
             by_cases heq : z = y
             · subst heq
               left
               apply List.Mem.head
             · right
               exact mem_domList_delete hdom heq
-      · -- Show (σ.delete y).closed (y :: X)
-        exact Subst.closed_delete_weaken hσclosed
+      · exact Subst.closed_delete_weaken hσclosed
   | app e₁ e₂ ih₁ ih₂ =>
     simp [substMap, Expr.closed, Bool.and_eq_true] at hclosed ⊢
     constructor
@@ -322,80 +294,117 @@ theorem substMapClosed {X : List String} {σ : Subst} {e : Expr} :
     · exact ih₁ hclosed.1 hσclosed
     · exact ih₂ hclosed.2 hσclosed
 
--- TODO: Complete this proof
+-- Key lemma: interaction between normal substitution and parallel substitution
 -- Corresponds to Coq's subst_subst_map
--- Key lemma showing interaction between normal substitution and parallel substitution
--- Strategy: Induction on e. For vars, use delete/insert properties and subst_closed_nil.
---           For lambdas, need to show delete/insert commute appropriately.
--- Requires: subst_closed_nil to be completed first
--- See parallel_subst.v lines 90-111
 theorem subst_substMap_compose {x : String} {es : Expr} {θ : Subst} {e : Expr} :
     θ.closed [] →
     subst x es (substMap (θ.delete x) e) = substMap (Subst.insert x es θ) e := by
   intro hclosed
-  induction e with
+  induction e generalizing θ with
   | var y =>
-    -- Variable case: need to consider whether y = x and whether y is in θ
-    sorry
+    simp only [substMap, Subst.lookup, Subst.delete, Subst.insert]
+    by_cases hxy : x = y
+    · subst hxy
+      rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+      simp [subst]
+      rw [LawfulPartialMap.get?_insert_eq (M := MapStr) rfl]
+    · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hxy]
+      rw [LawfulPartialMap.get?_insert_ne (M := MapStr) hxy]
+      cases hget : Iris.Std.get? (M := MapStr) θ y with
+      | none => simp [subst, hxy]
+      | some e' =>
+        have hcl : e'.closed [] := hclosed y e' hget
+        exact subst_closed_nil hcl
   | lam b e' ih =>
     cases b with
     | anon =>
       simp [substMap, subst]
-      exact ih
+      exact ih hclosed
     | named y =>
-      simp [substMap, subst]
+      simp only [substMap, subst]
       split
       · next heq =>
-        -- x = y case
-        subst heq
-        simp [Subst.delete, Subst.insert]
+        have hxy : x = y := by
+          cases heq; rfl
+        subst hxy
         congr 1
-        -- Need to show: (θ.erase x).erase x = (θ.insert x es).erase x
-        sorry
+        have : Subst.delete x (Subst.delete x θ) = Subst.delete x (Subst.insert x es θ) := by
+          apply subst_ext
+          intro k
+          show Iris.Std.get? (M := MapStr)
+            (Iris.Std.delete (M := MapStr) (Iris.Std.delete (M := MapStr) θ x) x) k =
+            Iris.Std.get? (M := MapStr)
+            (Iris.Std.delete (M := MapStr) (Iris.Std.insert (M := MapStr) θ x es) x) k
+          by_cases hkx : x = k
+          · rw [LawfulPartialMap.get?_delete_eq (M := MapStr) hkx,
+                 LawfulPartialMap.get?_delete_eq (M := MapStr) hkx]
+          · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
+                 LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
+                 LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
+                 LawfulPartialMap.get?_insert_ne (M := MapStr) hkx]
+        rw [this]
       · next hne =>
-        -- ¬(x = y) case, need commutativity of erase/insert operations
-        sorry
+        have hxy : x ≠ y := by
+          intro heq'
+          apply hne
+          rw [heq']
+        congr 1
+        have hcomm : Subst.delete y (Subst.delete x θ) = Subst.delete x (Subst.delete y θ) := by
+          apply subst_ext; intro k
+          show Iris.Std.get? (M := MapStr)
+            (Iris.Std.delete (M := MapStr) (Iris.Std.delete (M := MapStr) θ x) y) k =
+            Iris.Std.get? (M := MapStr)
+            (Iris.Std.delete (M := MapStr) (Iris.Std.delete (M := MapStr) θ y) x) k
+          by_cases hyk : y = k <;> by_cases hxk : x = k
+          · subst hyk; subst hxk; exact absurd rfl hxy
+          · subst hyk
+            rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
+                LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
+                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+          · subst hxk
+            rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
+                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+          · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+                 LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
+                 LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
+                 LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
+        have hcomm2 : Subst.delete y (Subst.insert x es θ) = Subst.insert x es (Subst.delete y θ) := by
+          apply subst_ext; intro k
+          show Iris.Std.get? (M := MapStr)
+            (Iris.Std.delete (M := MapStr) (Iris.Std.insert (M := MapStr) θ x es) y) k =
+            Iris.Std.get? (M := MapStr)
+            (Iris.Std.insert (M := MapStr) (Iris.Std.delete (M := MapStr) θ y) x es) k
+          by_cases hyk : y = k
+          · subst hyk
+            rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
+                LawfulPartialMap.get?_insert_ne (M := MapStr) hxy,
+                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+          · by_cases hxk : x = k
+            · subst hxk
+              rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+                  LawfulPartialMap.get?_insert_eq (M := MapStr) rfl,
+                  LawfulPartialMap.get?_insert_eq (M := MapStr) rfl]
+            · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+                   LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
+                   LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
+                   LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
+        rw [hcomm, hcomm2]
+        have hclosed' : (Subst.delete y θ).closed [] := by
+          intro z ez hlz
+          have hne' : z ≠ y := by
+            intro heq'
+            subst heq'
+            rw [lookup_delete_eq] at hlz
+            contradiction
+          rw [lookup_delete_ne hne'] at hlz
+          exact hclosed z ez hlz
+        exact ih hclosed'
   | app e₁ e₂ ih₁ ih₂ =>
-    simp [substMap, subst, ih₁, ih₂]
+    simp [substMap, subst, ih₁ hclosed, ih₂ hclosed]
   | litInt n =>
     simp [substMap, subst]
   | plus e₁ e₂ ih₁ ih₂ =>
-    simp [substMap, subst, ih₁, ih₂]
-
--- Helper: isSubSubstOf implies same values for common keys
--- This is a semantic property of substitution maps
--- NOTE: This requires isSubSubstOf to guarantee value equality, not just key membership
--- The current definition of isSubSubstOf may need to be strengthened
-theorem lookup_of_isSubSubstOf {σ1 σ2 : Subst} {x : String} :
-    σ1.isSubSubstOf σ2 → σ1.mem x →
-    ∃ e, σ1.lookup x = some e ∧ σ2.lookup x = some e := by
-  intro _ _
-  -- We have σ1.get? x = some e
-  -- We need to show σ2.get? x = some e
-  -- But isSubSubstOf only guarantees x ∈ σ2, not that σ2[x] = σ1[x]
-  -- This likely requires the definition of isSubSubstOf to be strengthened
-  sorry
-
--- TODO: Complete this proof
--- Corresponds to Coq's subst_closed_weaken
--- Weakening lemma for closed substitutions
--- Strategy: Use closed_weaken and properties of isSubSubstOf
--- See parallel_subst.v lines 82-87
-theorem substClosedWeaken {X Y: List String} {σ1 σ2 : Subst} :
-    (∀ x, x ∈ Y → x ∈ X) →
-    (σ1.isSubSubstOf σ2) →
-    σ2.closed Y →
-    σ1.closed X := by
-  intro hsub hsub12 hclosed2
-  unfold Subst.closed at *
-  intro x e he1
-  have hmem : σ1.mem x := by
-    simp only [Subst.mem, Subst.lookup] at he1 ⊢
-    simp [he1]
-  have ⟨e', ⟨he1', he2'⟩⟩ := lookup_of_isSubSubstOf hsub12 hmem
-  rw [he1'] at he1
-  cases he1
-  have := hclosed2 x e he2'
-  exact STLC.closed_weaken this hsub
+    simp [substMap, subst, ih₁ hclosed, ih₂ hclosed]
 
 end STLC

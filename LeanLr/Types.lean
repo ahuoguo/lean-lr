@@ -4,14 +4,12 @@
 -/
 
 import LeanLr.Lang
-import Std.Data.ExtTreeMap
 import LeanLr.Notation
 
-import Iris.Std.FiniteMap
-import Iris.Std.FiniteMapInst
-import Iris.Std.FiniteSet
-import Iris.Std.FiniteSetInst
-import Iris.Std.FiniteMapDom
+import Iris.Std.PartialMap
+import Iris.Std.GenSets
+import Iris.Std.GenSetsInstances
+import Iris.Std.HeapInstances
 
 open Iris.Std
 
@@ -25,40 +23,33 @@ inductive Ty where
 -- Notation for function types
 infixr:70 " ⇒ " => Ty.fun
 
--- Typing context using FiniteMap interface (like gmap in Coq)
--- The underlying implementation is ExtTreeMap, but we use the abstract interface
-abbrev Context := Std.ExtTreeMap String Ty compare
+-- The type constructor for our maps (like gmap string in Coq)
+abbrev MapStr (V : Type) := Std.ExtTreeMap String V compare
 
--- Type alias for the FiniteMap instance type
-abbrev CtxMap := Std.ExtTreeMap String
+-- Typing context
+abbrev Context := MapStr Ty
 
-abbrev StringSet := Std.TreeSet String compare
+-- Set type for domains
+abbrev StringSet := Std.ExtTreeSet String compare
 
--- Use FiniteMap operations for Context
--- We use the FiniteMap instance for Std.ExtTreeMap
-
-def Context.empty : Context :=
-  (FiniteMap.empty : CtxMap Ty)
+def Context.empty : Context := PartialMap.empty (M := MapStr) (V := Ty)
 
 def Context.delete (Γ : Context) (x : String) : Context :=
-  (FiniteMap.delete Γ x : CtxMap Ty)
+  Iris.Std.delete (M := MapStr) Γ x
 
 def Context.insert (Γ : Context) (x : String) (A : Ty) : Context :=
-  (FiniteMap.insert (FiniteMap.delete Γ x : CtxMap Ty) x A : CtxMap Ty)
+  Iris.Std.insert (M := MapStr) (Iris.Std.delete (M := MapStr) Γ x) x A
 
--- TODO: have the `(<[x:=A]> Γ)` notation ≠
 notation:90 Γ " <[ " x " := " A " ]> " => Context.insert Γ x A
 
 def Context.lookup (Γ : Context) (x : String) : Option Ty :=
-  FiniteMap.get? (M := CtxMap) Γ x
+  Iris.Std.get? (M := MapStr) Γ x
 
--- Return domain as a List (for compatibility with proofs using List operations)
 def Context.domList (Γ : Context) : List String :=
-  (FiniteMap.toList (M := CtxMap) Γ).map Prod.fst
+  (FiniteMap.toList (M := MapStr) Γ).map Prod.fst
 
--- Return domain as a FiniteSet (default) using FiniteMapDom
 def Context.dom (Γ : Context) : StringSet :=
-  domSet (M := CtxMap) (S := StringSet) Γ
+  FiniteMap.dom_set (M := MapStr) Γ
 
 
 inductive SynTyped : Context → Expr → Ty → Prop where
@@ -66,7 +57,6 @@ inductive SynTyped : Context → Expr → Ty → Prop where
       Γ.lookup x = some A →
       SynTyped Γ (Expr.var x) A
 
-  -- TODO: semantics course did not consider anonymous lambdas, we follow them
   | lam_named : ∀ {Γ x e A B},
       SynTyped (Γ.insert x A) e B →
       SynTyped Γ (Expr.lam (Binder.named x) e) (A ⇒ B)
