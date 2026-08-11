@@ -1,12 +1,14 @@
-/-
-  System F with recursive types and mutable state - Language Definition
-  Defines syntax, values, substitution, and operational semantics.
-  Ported from semantics-2025/theories/type_systems/systemf_mu_state/lang.v
+/-!
+# System F with recursive types and mutable state: language definition
+
+Syntax, values, substitution, evaluation contexts, and the contextual operational semantics.
 -/
 
 namespace SystemFMuState
 
--- Locations (heap addresses)
+/-! ## Syntax -/
+
+/-- A heap address. -/
 structure Loc where
   loc : Int
   deriving Repr, DecidableEq, Hashable
@@ -14,9 +16,10 @@ structure Loc where
 instance : Inhabited Loc := ⟨⟨0⟩⟩
 
 def Loc.add (l : Loc) (off : Int) : Loc := ⟨l.loc + off⟩
+
+/-- Offsets a location by an integer, enabling `l + off`. -/
 instance : HAdd Loc Int Loc := ⟨Loc.add⟩
 
--- Base literals
 inductive BaseLit where
   | litInt (n : Int)
   | litBool (b : Bool)
@@ -24,32 +27,32 @@ inductive BaseLit where
   | litLoc (l : Loc)
   deriving Repr, DecidableEq
 
--- Unary operators
 inductive UnOp where
   | negOp
   | minusUnOp
   deriving Repr, DecidableEq
 
--- Binary operators
 inductive BinOp where
   | plusOp | minusOp | multOp
   | ltOp | leOp | eqOp
   deriving Repr, DecidableEq
 
--- Binders (like stdpp binder)
+/-- A binder is either a name or anonymous; an anonymous binder discards its argument. -/
 inductive Binder where
-  | bNamed : String → Binder
-  | bAnon : Binder
+  | bNamed (s : String)
+  | bAnon
   deriving Repr, DecidableEq
 
+/-- Adds a binder to a list of names, dropping the anonymous binder. -/
 def Binder.cons (b : Binder) (ss : List String) : List String :=
   match b with
-  | Binder.bAnon => ss
-  | Binder.bNamed s => s :: ss
+  | .bAnon => ss
+  | .bNamed s => s :: ss
 
-notation :90 b " :b: " ss => Binder.cons b ss
+@[inherit_doc] notation :90 b " :b: " ss => Binder.cons b ss
 
--- Expressions
+/-- Expressions. Type abstraction and existential packing are erased: `tLam`, `tApp`, `pack`
+and `roll` carry no type annotation, and `unpack` binds only a term variable. -/
 inductive Expr where
   | lit (l : BaseLit)
   | var (x : String)
@@ -80,7 +83,6 @@ inductive Expr where
   | new (e : Expr)
   deriving Repr
 
--- Values
 inductive Val where
   | litV (l : BaseLit)
   | lamV (x : Binder) (e : Expr)
@@ -92,7 +94,7 @@ inductive Val where
   | rollV (v : Val)
   deriving Repr
 
--- Convert value to expression
+/-- Injects a value into the expressions. -/
 def Val.toExpr : Val → Expr
   | .litV l => .lit l
   | .lamV x e => .lam x e
@@ -103,7 +105,7 @@ def Val.toExpr : Val → Expr
   | .injRV v => .injR v.toExpr
   | .rollV v => .roll v.toExpr
 
--- Try to convert expression to value
+/-- Partial inverse of `Val.toExpr`: returns `some v` exactly when the expression is a value. -/
 def Expr.toVal? : Expr → Option Val
   | .lit l => some (.litV l)
   | .lam x e => some (.lamV x e)
@@ -118,7 +120,8 @@ def Expr.toVal? : Expr → Option Val
   | .roll e => e.toVal?.map Val.rollV
   | _ => none
 
--- Check if expression is a value
+/-- `e.isVal` holds exactly when `e` is in the image of `Val.toExpr`. Stated as a `Prop` rather
+than via `Expr.toVal?` so that the reduction rules can be destructed structurally. -/
 def Expr.isVal : Expr → Prop
   | .lit _ => True
   | .lam _ _ => True
@@ -130,7 +133,9 @@ def Expr.isVal : Expr → Prop
   | .roll e => e.isVal
   | _ => False
 
--- Substitution
+/-! ## Substitution -/
+
+/-- `subst x es e` replaces every free occurrence of the term variable `x` in `e` by `es`. -/
 def subst (x : String) (es : Expr) : Expr → Expr
   | .lit l => .lit l
   | .var y => if x = y then es else .var y
@@ -157,41 +162,47 @@ def subst (x : String) (es : Expr) : Expr → Expr
   | .store e₁ e₂ => .store (subst x es e₁) (subst x es e₂)
   | .new e => .new (subst x es e)
 
+/-- Substitution for a binder; the anonymous binder substitutes nothing. -/
 def subst' (b : Binder) (es : Expr) : Expr → Expr :=
   match b with
   | .bNamed x => subst x es
   | .bAnon => id
 
--- Heaps
+/-! ## Heaps -/
+
+/-- Heaps map locations to values. Since a heap is a total function it has no finite domain of
+its own; a location is unallocated in `h` exactly when `h l = none`. -/
 abbrev Heap := Loc → Option Val
 
+/-- The heap in which every location is unallocated. -/
 def Heap.empty : Heap := fun _ => none
 
--- Unary operator evaluation
+/-- Pointwise heap update: `h` with `l` remapped to `v`. -/
+def Heap.insert (h : Heap) (l : Loc) (v : Val) : Heap :=
+  fun l' => if l' = l then some v else h l'
+
+/-! ## Operational semantics -/
+
+/-- Evaluates a unary operator, failing on ill-typed operands. -/
 def unOpEval (op : UnOp) (v : Val) : Option Val :=
   match op, v with
   | .negOp, .litV (.litBool b) => some (.litV (.litBool (!b)))
   | .minusUnOp, .litV (.litInt n) => some (.litV (.litInt (-n)))
   | _, _ => none
 
--- Binary operator evaluation
+/-- Evaluates a binary operator, failing on ill-typed operands. -/
 def binOpEval (op : BinOp) (v₁ v₂ : Val) : Option Val :=
   match op, v₁, v₂ with
-  | .plusOp, .litV (.litInt n₁), .litV (.litInt n₂) =>
-    some (.litV (.litInt (n₁ + n₂)))
-  | .minusOp, .litV (.litInt n₁), .litV (.litInt n₂) =>
-    some (.litV (.litInt (n₁ - n₂)))
-  | .multOp, .litV (.litInt n₁), .litV (.litInt n₂) =>
-    some (.litV (.litInt (n₁ * n₂)))
-  | .ltOp, .litV (.litInt n₁), .litV (.litInt n₂) =>
-    some (.litV (.litBool (n₁ < n₂)))
-  | .leOp, .litV (.litInt n₁), .litV (.litInt n₂) =>
-    some (.litV (.litBool (n₁ ≤ n₂)))
-  | .eqOp, .litV (.litInt n₁), .litV (.litInt n₂) =>
-    some (.litV (.litBool (n₁ = n₂)))
+  | .plusOp, .litV (.litInt n₁), .litV (.litInt n₂) => some (.litV (.litInt (n₁ + n₂)))
+  | .minusOp, .litV (.litInt n₁), .litV (.litInt n₂) => some (.litV (.litInt (n₁ - n₂)))
+  | .multOp, .litV (.litInt n₁), .litV (.litInt n₂) => some (.litV (.litInt (n₁ * n₂)))
+  | .ltOp, .litV (.litInt n₁), .litV (.litInt n₂) => some (.litV (.litBool (n₁ < n₂)))
+  | .leOp, .litV (.litInt n₁), .litV (.litInt n₂) => some (.litV (.litBool (n₁ ≤ n₂)))
+  | .eqOp, .litV (.litInt n₁), .litV (.litInt n₂) => some (.litV (.litBool (n₁ = n₂)))
   | _, _, _ => none
 
--- Evaluation contexts (right-to-left evaluation)
+/-- A single evaluation-context frame. Binary constructs evaluate right to left: the left frame
+holds an already-evaluated `Val` and the right frame a not-yet-evaluated `Expr`. -/
 inductive EctxItem where
   | appLCtx (v : Val)
   | appRCtx (e : Expr)
@@ -216,8 +227,10 @@ inductive EctxItem where
   | storeRCtx (e : Expr)
   | newCtx
 
+/-- An evaluation context, innermost frame first. -/
 abbrev Ectx := List EctxItem
 
+/-- Plugs an expression into a single frame. -/
 def fillItem (Ki : EctxItem) (e : Expr) : Expr :=
   match Ki with
   | .appLCtx v => .app e v.toExpr
@@ -243,10 +256,12 @@ def fillItem (Ki : EctxItem) (e : Expr) : Expr :=
   | .storeRCtx e₁ => .store e₁ e
   | .newCtx => .new e
 
+/-- Plugs an expression into a context, applying the frames from the inside out. -/
 def fill (K : Ectx) (e : Expr) : Expr :=
   K.foldl (fun acc ki => fillItem ki acc) e
 
--- Base reduction (single step, with heap)
+/-- A single reduction of a redex, threading the heap through. Allocation picks any location
+that is unallocated in the current heap, so `newS` is nondeterministic. -/
 inductive BaseStep : Expr × Heap → Expr × Heap → Prop where
   | betaS x e₁ e₂ h :
       Expr.isVal e₂ →
@@ -275,7 +290,7 @@ inductive BaseStep : Expr × Heap → Expr × Heap → Prop where
   | sndS e₁ e₂ h :
       Expr.isVal e₁ → Expr.isVal e₂ →
       BaseStep (.snd (.pair e₁ e₂), h) (e₂, h)
-  | caseLΞ e e₁ e₂ h :
+  | caseLS e e₁ e₂ h :
       Expr.isVal e →
       BaseStep (.case (.injL e) e₁ e₂, h) (.app e₁ e, h)
   | caseRS e e₁ e₂ h :
@@ -287,28 +302,28 @@ inductive BaseStep : Expr × Heap → Expr × Heap → Prop where
   | newS e v l h :
       Expr.toVal? e = some v →
       h l = none →
-      BaseStep (.new e, h) (.lit (.litLoc l), fun l' => if l' = l then some v else h l')
+      BaseStep (.new e, h) (.lit (.litLoc l), Heap.insert h l v)
   | loadS l v h :
       h l = some v →
       BaseStep (.load (.lit (.litLoc l)), h) (v.toExpr, h)
   | storeS l v e₂ h :
       h l ≠ none →
       Expr.toVal? e₂ = some v →
-      BaseStep (.store (.lit (.litLoc l)) e₂, h) (.lit .litUnit, fun l' => if l' = l then some v else h l')
+      BaseStep (.store (.lit (.litLoc l)) e₂, h) (.lit .litUnit, Heap.insert h l v)
 
--- Contextual step
+/-- A reduction step of a whole program: a `BaseStep` under an evaluation context. -/
 inductive ContextualStep : Expr × Heap → Expr × Heap → Prop where
   | ectxStep (K : Ectx) (e₁ e₂ : Expr) (h₁ h₂ : Heap) :
       BaseStep (e₁, h₁) (e₂, h₂) →
       ContextualStep (fill K e₁, h₁) (fill K e₂, h₂)
 
-def reducible (e : Expr) (h : Heap) : Prop :=
-  ∃ e' h', ContextualStep (e, h) (e', h')
+def reducible (e : Expr) (h : Heap) : Prop := ∃ e' h', ContextualStep (e, h) (e', h')
 
-def irreducible (e : Expr) (h : Heap) : Prop :=
-  ¬ reducible e h
+def irreducible (e : Expr) (h : Heap) : Prop := ¬ reducible e h
 
--- Closedness
+/-! ## Closedness -/
+
+/-- `e.isClosed X` holds when every free term variable of `e` occurs in `X`. -/
 def Expr.isClosed (X : List String) : Expr → Bool
   | .lit _ => true
   | .var x => x ∈ X
@@ -333,6 +348,7 @@ def Expr.isClosed (X : List String) : Expr → Bool
   | .store e₁ e₂ => e₁.isClosed X && e₂.isClosed X
   | .new e => e.isClosed X
 
+/-- `Prop`-valued form of `Expr.isClosed`, for use as a hypothesis. -/
 abbrev closed (X : List String) (e : Expr) : Prop := e.isClosed X = true
 
 end SystemFMuState

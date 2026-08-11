@@ -1,29 +1,38 @@
-/-
-  System F with recursive types and mutable state - Parallel Substitution
-  Ported from semantics-2025/theories/type_systems/systemf_mu_state/parallel_subst.v
--/
-
 import LeanLR.TypeSystems.SystemFMuState.Lang
 
 import Iris.Std.PartialMap
 import Iris.Std.HeapInstances
 
+/-!
+# System F with recursive types and mutable state: parallel substitution
+
+`substMap` substitutes a whole finite map of expressions at once. The main results relate it to the
+single-variable `subst` of `Lang.lean` and characterise when its result is closed.
+-/
+
 open Iris.Std
 
 namespace SystemFMuState
 
+/-! ## Parallel substitution -/
+
+/-- Finite maps keyed by term variables. -/
 abbrev MapStr (V : Type) := Std.ExtTreeMap String V compare
+
+/-- A simultaneous substitution: what to put in place of each term variable. -/
 abbrev SubstMap := MapStr Expr
 
+/-- Removes a binder's variable from a substitution, so that the binder shadows it. The anonymous
+binder shadows nothing. -/
 def binderDelete (b : Binder) (m : SubstMap) : SubstMap :=
   match b with
   | .bAnon => m
-  | .bNamed x => Iris.Std.delete (M := MapStr) m x
+  | .bNamed x => delete (M := MapStr) m x
 
--- Parallel substitution
+/-- `substMap xs e` replaces every free term variable of `e` that `xs` maps, all at once. -/
 def substMap (xs : SubstMap) : Expr → Expr
   | .lit l => .lit l
-  | .var y => match Iris.Std.get? (M := MapStr) xs y with | some es => es | none => .var y
+  | .var y => match get? (M := MapStr) xs y with | some es => es | none => .var y
   | .lam x e => .lam x (substMap (binderDelete x xs) e)
   | .app e₁ e₂ => .app (substMap xs e₁) (substMap xs e₂)
   | .unOp op e => .unOp op (substMap xs e)
@@ -45,396 +54,373 @@ def substMap (xs : SubstMap) : Expr → Expr
   | .store e₁ e₂ => .store (substMap xs e₁) (substMap xs e₂)
   | .new e => .new (substMap xs e)
 
+/-- Deleting from the empty substitution changes nothing. -/
 private theorem binderDelete_empty (b : Binder) :
     binderDelete b (PartialMap.empty (M := MapStr) (V := Expr)) =
     PartialMap.empty (M := MapStr) (V := Expr) := by
   cases b with
   | bAnon => rfl
   | bNamed x =>
-    simp only [binderDelete]
-    exact ExtensionalPartialMap.equiv_iff_eq.mp
-      (LawfulPartialMap.delete_empty (M := MapStr))
+    exact ExtensionalPartialMap.equiv_iff_eq.mp (LawfulPartialMap.delete_empty (M := MapStr))
 
+/-- The empty substitution acts as the identity. -/
 theorem substMap_empty (e : Expr) :
     substMap (PartialMap.empty (M := MapStr) (V := Expr)) e = e := by
-  induction e with
-  | lit _ => rfl
-  | var y =>
-    simp only [substMap]
-    have h : Iris.Std.get? (M := MapStr) (PartialMap.empty (M := MapStr) (V := Expr)) y = none :=
-      LawfulPartialMap.get?_empty (M := MapStr) y
-    simp [h]
-  | lam b e' ih => simp only [substMap]; rw [binderDelete_empty, ih]
-  | app e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
-  | unOp op e' ih => simp [substMap, ih]
-  | binOp op e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
-  | ite e₀ e₁ e₂ ih₀ ih₁ ih₂ => simp [substMap, ih₀, ih₁, ih₂]
-  | tApp e' ih => simp [substMap, ih]
-  | tLam e' ih => simp [substMap, ih]
-  | pack e' ih => simp [substMap, ih]
-  | unpack b e₁ e₂ ih₁ ih₂ => simp only [substMap]; rw [binderDelete_empty, ih₁, ih₂]
-  | pair e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
-  | fst e' ih => simp [substMap, ih]
-  | snd e' ih => simp [substMap, ih]
-  | injL e' ih => simp [substMap, ih]
-  | injR e' ih => simp [substMap, ih]
-  | case e₀ e₁ e₂ ih₀ ih₁ ih₂ => simp [substMap, ih₀, ih₁, ih₂]
-  | roll e' ih => simp [substMap, ih]
-  | unroll e' ih => simp [substMap, ih]
-  | load e' ih => simp [substMap, ih]
-  | store e₁ e₂ ih₁ ih₂ => simp [substMap, ih₁, ih₂]
-  | new e' ih => simp [substMap, ih]
+  have hget : ∀ y, get? (M := MapStr) (PartialMap.empty (M := MapStr) (V := Expr)) y = none :=
+    LawfulPartialMap.get?_empty (M := MapStr)
+  induction e <;> simp_all [substMap, binderDelete_empty]
 
+/-! ## Closedness -/
+
+/-- `substIsClosed X m` says every expression in the range of `m` is `X`-closed. -/
 def substIsClosed (X : List String) (m : SubstMap) : Prop :=
-  ∀ x e, Iris.Std.get? (M := MapStr) m x = some e → closed X e
+  ∀ x e, get? (M := MapStr) m x = some e → closed X e
 
-private theorem subst_closed_notmem {x : String} {es : Expr} {e : Expr} {X : List String}
+/-- Extending the variable list preserves closedness under a binder. -/
+private theorem cons_subset {b : Binder} {X Y : List String}
+    (hsub : ∀ x, x ∈ X → x ∈ Y) : ∀ x, x ∈ (b :b: X) → x ∈ (b :b: Y) := by
+  cases b with
+  | bAnon => exact hsub
+  | bNamed y =>
+    intro z hz
+    cases hz with
+    | head => exact .head _
+    | tail _ hz' => exact .tail _ (hsub z hz')
+
+/-- Closedness is monotone in the list of permitted variables. -/
+theorem closed_weaken {X Y : List String} {e : Expr}
+    (hclosed : closed X e) (hsub : ∀ x, x ∈ X → x ∈ Y) : closed Y e := by
+  induction e generalizing X Y with
+  | lit _ => rfl
+  | var x =>
+    simp only [closed, Expr.isClosed, decide_eq_true_eq] at hclosed ⊢
+    exact hsub x hclosed
+  | lam _ _ ih => exact ih hclosed (cons_subset hsub)
+  | unpack _ _ _ ih₁ ih₂ =>
+    simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed ⊢
+    exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 (cons_subset hsub)⟩
+  | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+    exact ih hclosed hsub
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+    simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed ⊢
+    exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 hsub⟩
+  | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
+    simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed ⊢
+    exact ⟨⟨ih₀ hclosed.1.1 hsub, ih₁ hclosed.1.2 hsub⟩, ih₂ hclosed.2 hsub⟩
+
+/-- Substituting a variable the expression does not have free is a no-op. -/
+private theorem subst_closed_notmem {x : String} {es e : Expr} {X : List String}
     (hclosed : closed X e) (hnotmem : x ∉ X) : subst x es e = e := by
   induction e generalizing X with
   | lit _ => rfl
   | var y =>
-    simp [closed, Expr.isClosed] at hclosed
-    simp only [subst]
-    have hne : x ≠ y := by intro heq; subst heq; exact hnotmem hclosed
-    simp [hne]
+    simp only [closed, Expr.isClosed, decide_eq_true_eq] at hclosed
+    have hne : x ≠ y := fun heq => hnotmem (heq ▸ hclosed)
+    simp [subst, hne]
   | lam b e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst
+    simp only [closed, Expr.isClosed] at hclosed
+    refine congrArg (Expr.lam b) ?_
     cases b with
-    | bAnon =>
-      congr 1
-      exact ih hclosed hnotmem
+    | bAnon => exact ih hclosed hnotmem
     | bNamed y =>
-      congr 1
-      simp only [Binder.cons] at hclosed
-      by_cases hxy : Binder.bNamed x = Binder.bNamed y
+      by_cases hxy : x = y
       · simp [hxy]
-      · simp [hxy]
-        have hxy' : x ≠ y := by intro h; exact hxy (congrArg Binder.bNamed h)
-        exact ih hclosed (fun hmem => by
+      · simp only [Binder.cons] at hclosed
+        rw [if_neg fun h => hxy (by cases h; rfl)]
+        exact ih hclosed fun hmem => by
           cases hmem with
-          | head => exact hxy' rfl
-          | tail _ hmem' => exact hnotmem hmem')
-  | app e₁ e₂ ih₁ ih₂ =>
-    simp [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
-    unfold subst; congr 1
-    · exact ih₁ hclosed.1 hnotmem
-    · exact ih₂ hclosed.2 hnotmem
-  | unOp op e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | binOp op e₁ e₂ ih₁ ih₂ =>
-    simp [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
-    unfold subst; congr 1
-    · exact ih₁ hclosed.1 hnotmem
-    · exact ih₂ hclosed.2 hnotmem
-  | ite e₀ e₁ e₂ ih₀ ih₁ ih₂ =>
-    simp [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
-    unfold subst; congr 1
-    · exact ih₀ hclosed.1.1 hnotmem
-    · exact ih₁ hclosed.1.2 hnotmem
-    · exact ih₂ hclosed.2 hnotmem
-  | tApp e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | tLam e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | pack e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
+          | head => exact hxy rfl
+          | tail _ hmem' => exact hnotmem hmem'
   | unpack b e₁ e₂ ih₁ ih₂ =>
-    simp [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
+    simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
     unfold subst
-    cases b with
-    | bAnon =>
-      congr 1
-      · exact ih₁ hclosed.1 hnotmem
-      · exact ih₂ hclosed.2 hnotmem
-    | bNamed y =>
-      simp only [Binder.cons] at hclosed
-      congr 1
-      · exact ih₁ hclosed.1 hnotmem
-      · by_cases hxy : Binder.bNamed x = Binder.bNamed y
+    congr 1
+    · exact ih₁ hclosed.1 hnotmem
+    · cases b with
+      | bAnon => exact ih₂ hclosed.2 hnotmem
+      | bNamed y =>
+        by_cases hxy : x = y
         · simp [hxy]
-        · simp [hxy]
-          have hxy' : x ≠ y := by intro h; exact hxy (congrArg Binder.bNamed h)
-          exact ih₂ hclosed.2 (fun hmem => by
+        · simp only [Binder.cons] at hclosed
+          rw [if_neg fun h => hxy (by cases h; rfl)]
+          exact ih₂ hclosed.2 fun hmem => by
             cases hmem with
-            | head => exact hxy' rfl
-            | tail _ hmem' => exact hnotmem hmem')
-  | pair e₁ e₂ ih₁ ih₂ =>
-    simp [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
-    unfold subst; congr 1
+            | head => exact hxy rfl
+            | tail _ hmem' => exact hnotmem hmem'
+  | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+    simp only [closed, Expr.isClosed] at hclosed
+    unfold subst
+    congr 1
+    exact ih hclosed hnotmem
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+    simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
+    unfold subst
+    congr 1
     · exact ih₁ hclosed.1 hnotmem
     · exact ih₂ hclosed.2 hnotmem
-  | fst e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | snd e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | injL e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | injR e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | case e₀ e₁ e₂ ih₀ ih₁ ih₂ =>
-    simp [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
-    unfold subst; congr 1
+  | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
+    simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
+    unfold subst
+    congr 1
     · exact ih₀ hclosed.1.1 hnotmem
     · exact ih₁ hclosed.1.2 hnotmem
     · exact ih₂ hclosed.2 hnotmem
-  | roll e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | unroll e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | load e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
-  | store e₁ e₂ ih₁ ih₂ =>
-    simp [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
-    unfold subst; congr 1
-    · exact ih₁ hclosed.1 hnotmem
-    · exact ih₂ hclosed.2 hnotmem
-  | new e' ih =>
-    simp [closed, Expr.isClosed] at hclosed
-    unfold subst; congr 1; exact ih hclosed hnotmem
 
-private theorem subst_closed_nil {x : String} {es : Expr} {e : Expr}
-    (hclosed : closed [] e) : subst x es e = e :=
+/-- Substitution into a closed expression is a no-op. -/
+private theorem subst_closed_nil {x : String} {es e : Expr} (hclosed : closed [] e) :
+    subst x es e = e :=
   subst_closed_notmem hclosed (by simp)
 
+/-! ## Map algebra
+
+The equations `subst_substMap` needs to move a deletion past the insertion it competes with. Each
+is proved pointwise through `map_ext`. -/
+
+/-- Substitutions agreeing at every key are equal. -/
 private theorem map_ext {m₁ m₂ : SubstMap}
-    (h : ∀ k, Iris.Std.get? (M := MapStr) m₁ k = Iris.Std.get? (M := MapStr) m₂ k) :
-    m₁ = m₂ :=
+    (h : ∀ k, get? (M := MapStr) m₁ k = get? (M := MapStr) m₂ k) : m₁ = m₂ :=
   ExtensionalPartialMap.equiv_iff_eq.mp h
 
-theorem subst_substMap (x : String) (es : Expr) (m : SubstMap) (e : Expr) :
-    substIsClosed [] m →
-    subst x es (substMap (Iris.Std.delete (M := MapStr) m x) e) =
-    substMap (Iris.Std.insert (M := MapStr) m x es) e := by
-  intro hclosed
+/-- An insertion is invisible behind a deletion of the same key. -/
+private theorem delete_delete_insert (m : SubstMap) (x : String) (es : Expr) :
+    delete (M := MapStr) (delete (M := MapStr) m x) x =
+    delete (M := MapStr) (insert (M := MapStr) m x es) x := by
+  refine map_ext fun k => ?_
+  by_cases hkx : x = k
+  · rw [LawfulPartialMap.get?_delete_eq (M := MapStr) hkx,
+      LawfulPartialMap.get?_delete_eq (M := MapStr) hkx]
+  · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
+      LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
+      LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
+      LawfulPartialMap.get?_insert_ne (M := MapStr) hkx]
+
+/-- Deletions at distinct keys commute. -/
+private theorem delete_delete_comm (m : SubstMap) {x y : String} (hxy : x ≠ y) :
+    delete (M := MapStr) (delete (M := MapStr) m x) y =
+    delete (M := MapStr) (delete (M := MapStr) m y) x := by
+  refine map_ext fun k => ?_
+  by_cases hyk : y = k <;> by_cases hxk : x = k
+  · exact absurd (hxk.trans hyk.symm) hxy
+  · subst hyk
+    rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
+      LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
+      LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+  · subst hxk
+    rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+      LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
+      LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+  · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+      LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
+      LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
+      LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
+
+/-- A deletion and an insertion at distinct keys commute. -/
+private theorem delete_insert_comm (m : SubstMap) (es : Expr) {x y : String} (hxy : x ≠ y) :
+    delete (M := MapStr) (insert (M := MapStr) m x es) y =
+    insert (M := MapStr) (delete (M := MapStr) m y) x es := by
+  refine map_ext fun k => ?_
+  by_cases hyk : y = k
+  · subst hyk
+    rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
+      LawfulPartialMap.get?_insert_ne (M := MapStr) hxy,
+      LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+  · by_cases hxk : x = k
+    · subst hxk
+      rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+        LawfulPartialMap.get?_insert_eq (M := MapStr) rfl,
+        LawfulPartialMap.get?_insert_eq (M := MapStr) rfl]
+    · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
+        LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
+        LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
+        LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
+
+/-- Deleting a key preserves closedness of the range. -/
+private theorem substIsClosed_delete {X : List String} {m : SubstMap} (y : String)
+    (hm : substIsClosed X m) : substIsClosed X (delete (M := MapStr) m y) := by
+  intro z ez hlz
+  refine hm z ez ?_
+  by_cases hyz : y = z
+  · subst hyz
+    rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl] at hlz
+    exact absurd hlz (by simp)
+  · rwa [LawfulPartialMap.get?_delete_ne (M := MapStr) hyz] at hlz
+
+/-! ## Relating `substMap` to `subst` -/
+
+/-- Substituting `x` after the map, or inserting `x` into the map, agree — provided the map's range
+is closed, so that the outer `subst x` cannot reach into a substituted expression.
+
+Both binder cases split on whether the binder shadows `x`. If it does, the insertion is discarded
+(`delete_delete_insert`); otherwise the deletion of the binder commutes past both the deletion and
+the insertion of `x` (`delete_delete_comm`, `delete_insert_comm`) and the induction hypothesis
+applies at the smaller map. -/
+theorem subst_substMap (x : String) (es : Expr) (m : SubstMap) (e : Expr)
+    (hclosed : substIsClosed [] m) :
+    subst x es (substMap (delete (M := MapStr) m x) e) =
+    substMap (insert (M := MapStr) m x es) e := by
   induction e generalizing m with
-  | lit _ => simp [substMap, subst]
+  | lit _ => rfl
   | var y =>
     simp only [substMap]
     by_cases hxy : x = y
     · subst hxy
-      rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
+      rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
+        LawfulPartialMap.get?_insert_eq (M := MapStr) rfl]
       simp [subst]
-      rw [LawfulPartialMap.get?_insert_eq (M := MapStr) rfl]
-    · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hxy]
-      rw [LawfulPartialMap.get?_insert_ne (M := MapStr) hxy]
-      cases hget : Iris.Std.get? (M := MapStr) m y with
+    · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hxy,
+        LawfulPartialMap.get?_insert_ne (M := MapStr) hxy]
+      cases hget : get? (M := MapStr) m y with
       | none => simp [subst, hxy]
-      | some e' =>
-        have hcl : closed [] e' := hclosed y e' hget
-        exact subst_closed_nil hcl
+      | some e' => exact subst_closed_nil (hclosed y e' hget)
   | lam b e' ih =>
     cases b with
     | bAnon =>
       simp only [substMap, binderDelete, subst]
-      congr 1; exact ih m hclosed
+      exact congrArg _ (ih m hclosed)
     | bNamed y =>
-      simp only [substMap, binderDelete]
-      unfold subst
-      congr 1
-      by_cases hxy : Binder.bNamed x = Binder.bNamed y
-      · -- x = y case (binder shadows)
-        simp [hxy]
-        have hxy' : x = y := by cases hxy; rfl
-        subst hxy'
-        congr 1
-        apply map_ext; intro k
-        by_cases hkx : x = k
-        · rw [LawfulPartialMap.get?_delete_eq (M := MapStr) hkx,
-               LawfulPartialMap.get?_delete_eq (M := MapStr) hkx]
-        · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
-               LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
-               LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
-               LawfulPartialMap.get?_insert_ne (M := MapStr) hkx]
-      · -- x ≠ y case
-        simp [hxy]
-        have hxy' : x ≠ y := by intro heq'; apply hxy; rw [heq']
-        have hcomm : Iris.Std.delete (M := MapStr) (Iris.Std.delete (M := MapStr) m x) y =
-                     Iris.Std.delete (M := MapStr) (Iris.Std.delete (M := MapStr) m y) x := by
-          apply map_ext; intro k
-          by_cases hyk : y = k <;> by_cases hxk : x = k
-          · subst hyk; subst hxk; exact absurd rfl hxy'
-          · subst hyk
-            rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
-                LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
-                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
-          · subst hxk
-            rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
-                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
-          · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                 LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
-                 LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
-                 LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
-        have hcomm2 : Iris.Std.delete (M := MapStr) (Iris.Std.insert (M := MapStr) m x es) y =
-                      Iris.Std.insert (M := MapStr) (Iris.Std.delete (M := MapStr) m y) x es := by
-          apply map_ext; intro k
-          by_cases hyk : y = k
-          · subst hyk
-            rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
-                LawfulPartialMap.get?_insert_ne (M := MapStr) hxy',
-                LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
-          · by_cases hxk : x = k
-            · subst hxk
-              rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                  LawfulPartialMap.get?_insert_eq (M := MapStr) rfl,
-                  LawfulPartialMap.get?_insert_eq (M := MapStr) rfl]
-            · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                   LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
-                   LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
-                   LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
-        rw [hcomm, hcomm2]
-        have hclosed' : substIsClosed [] (Iris.Std.delete (M := MapStr) m y) := by
-          intro z ez hlz
-          have hne' : y ≠ z := by
-            intro heq'; subst heq'
-            rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl] at hlz
-            contradiction
-          rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hne'] at hlz
-          exact hclosed z ez hlz
-        exact ih _ hclosed'
-  | app e₁ e₂ ih₁ ih₂ =>
-    simp only [substMap, subst]; congr 1
-    · exact ih₁ m hclosed
-    · exact ih₂ m hclosed
-  | unOp op e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | binOp op e₁ e₂ ih₁ ih₂ =>
-    simp only [substMap, subst]; congr 1
-    · exact ih₁ m hclosed
-    · exact ih₂ m hclosed
-  | ite e₀ e₁ e₂ ih₀ ih₁ ih₂ =>
-    simp only [substMap, subst]; congr 1
-    · exact ih₀ m hclosed
-    · exact ih₁ m hclosed
-    · exact ih₂ m hclosed
-  | tApp e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | tLam e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | pack e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | unpack b e₁ e₂ ih₁ ih₂ =>
-    cases b with
-    | bAnon =>
       simp only [substMap, binderDelete, subst]
-      congr 1
-      · exact ih₁ m hclosed
-      · exact ih₂ m hclosed
-    | bNamed y =>
-      simp only [substMap, binderDelete]
-      unfold subst
-      congr 1
-      · exact ih₁ m hclosed
-      · by_cases hxy : Binder.bNamed x = Binder.bNamed y
-        · -- x = y case
-          simp [hxy]
-          have hxy' : x = y := by cases hxy; rfl
-          subst hxy'
-          congr 1
-          apply map_ext; intro k
-          by_cases hkx : x = k
-          · rw [LawfulPartialMap.get?_delete_eq (M := MapStr) hkx,
-                 LawfulPartialMap.get?_delete_eq (M := MapStr) hkx]
-          · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
-                 LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
-                 LawfulPartialMap.get?_delete_ne (M := MapStr) hkx,
-                 LawfulPartialMap.get?_insert_ne (M := MapStr) hkx]
-        · -- x ≠ y case
-          simp [hxy]
-          have hxy' : x ≠ y := by intro heq'; apply hxy; rw [heq']
-          have hcomm : Iris.Std.delete (M := MapStr) (Iris.Std.delete (M := MapStr) m x) y =
-                       Iris.Std.delete (M := MapStr) (Iris.Std.delete (M := MapStr) m y) x := by
-            apply map_ext; intro k
-            by_cases hyk : y = k <;> by_cases hxk : x = k
-            · subst hyk; subst hxk; exact absurd rfl hxy'
-            · subst hyk
-              rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
-                  LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
-                  LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
-            · subst hxk
-              rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                  LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
-                  LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
-            · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                   LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
-                   LawfulPartialMap.get?_delete_ne (M := MapStr) hxk,
-                   LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
-          have hcomm2 : Iris.Std.delete (M := MapStr) (Iris.Std.insert (M := MapStr) m x es) y =
-                        Iris.Std.insert (M := MapStr) (Iris.Std.delete (M := MapStr) m y) x es := by
-            apply map_ext; intro k
-            by_cases hyk : y = k
-            · subst hyk
-              rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl,
-                  LawfulPartialMap.get?_insert_ne (M := MapStr) hxy',
-                  LawfulPartialMap.get?_delete_eq (M := MapStr) rfl]
-            · by_cases hxk : x = k
-              · subst hxk
-                rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                    LawfulPartialMap.get?_insert_eq (M := MapStr) rfl,
-                    LawfulPartialMap.get?_insert_eq (M := MapStr) rfl]
-              · rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hyk,
-                     LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
-                     LawfulPartialMap.get?_insert_ne (M := MapStr) hxk,
-                     LawfulPartialMap.get?_delete_ne (M := MapStr) hyk]
-          rw [hcomm, hcomm2]
-          have hclosed' : substIsClosed [] (Iris.Std.delete (M := MapStr) m y) := by
-            intro z ez hlz
-            have hne' : y ≠ z := by
-              intro heq'; subst heq'
-              rw [LawfulPartialMap.get?_delete_eq (M := MapStr) rfl] at hlz
-              contradiction
-            rw [LawfulPartialMap.get?_delete_ne (M := MapStr) hne'] at hlz
-            exact hclosed z ez hlz
-          exact ih₂ _ hclosed'
-  | pair e₁ e₂ ih₁ ih₂ =>
-    simp only [substMap, subst]; congr 1
+      refine congrArg (Expr.lam (.bNamed y)) ?_
+      by_cases hxy : x = y
+      · subst hxy
+        rw [if_pos rfl, delete_delete_insert]
+      · rw [if_neg fun h => hxy (by cases h; rfl), delete_delete_comm m hxy,
+          delete_insert_comm m es hxy]
+        exact ih _ (substIsClosed_delete y hclosed)
+  | unpack b e₁ e₂ ih₁ ih₂ =>
+    simp only [substMap, subst]
+    congr 1
+    · exact ih₁ m hclosed
+    · cases b with
+      | bAnon => exact ih₂ m hclosed
+      | bNamed y =>
+        simp only [binderDelete]
+        by_cases hxy : x = y
+        · subst hxy
+          rw [if_pos rfl, delete_delete_insert]
+        · rw [if_neg fun h => hxy (by cases h; rfl), delete_delete_comm m hxy,
+            delete_insert_comm m es hxy]
+          exact ih₂ _ (substIsClosed_delete y hclosed)
+  | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+    simp only [substMap, subst]
+    congr 1
+    exact ih m hclosed
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+    simp only [substMap, subst]
+    congr 1
     · exact ih₁ m hclosed
     · exact ih₂ m hclosed
-  | fst e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | snd e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | injL e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | injR e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | case e₀ e₁ e₂ ih₀ ih₁ ih₂ =>
-    simp only [substMap, subst]; congr 1
+  | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
+    simp only [substMap, subst]
+    congr 1
     · exact ih₀ m hclosed
     · exact ih₁ m hclosed
     · exact ih₂ m hclosed
-  | roll e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | unroll e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | load e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
-  | store e₁ e₂ ih₁ ih₂ =>
-    simp only [substMap, subst]; congr 1
-    · exact ih₁ m hclosed
-    · exact ih₂ m hclosed
-  | new e' ih =>
-    simp only [substMap, subst]; congr 1; exact ih m hclosed
 
-theorem subst'_substMap (b : Binder) (es : Expr) (m : SubstMap) (e : Expr) :
-    substIsClosed [] m →
+/-- `subst_substMap` for an arbitrary binder; the anonymous binder substitutes nothing. -/
+theorem subst'_substMap (b : Binder) (es : Expr) (m : SubstMap) (e : Expr)
+    (hclosed : substIsClosed [] m) :
     subst' b es (substMap (binderDelete b m) e) =
-    substMap (match b with | .bAnon => m | .bNamed x => Iris.Std.insert (M := MapStr) m x es) e := by
-  intro hclosed
+    substMap (match b with | .bAnon => m | .bNamed x => insert (M := MapStr) m x es) e := by
   cases b with
   | bAnon => simp [subst', binderDelete]
   | bNamed x => exact subst_substMap x es m e hclosed
+
+/-! ## Closedness of the result -/
+
+/-- `closedModulo θ Y e` says every free variable of `e` is either in `Y` or substituted by `θ`.
+This is `Expr.isClosed` relaxed to also permit variables that `θ` covers. -/
+def closedModulo (θ : SubstMap) (Y : List String) : Expr → Prop
+  | .lit _ => True
+  | .var y => y ∈ Y ∨ get? (M := MapStr) θ y ≠ none
+  | .lam b e => closedModulo (binderDelete b θ) (b :b: Y) e
+  | .app e₁ e₂ => closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
+  | .unOp _ e => closedModulo θ Y e
+  | .binOp _ e₁ e₂ => closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
+  | .ite e₀ e₁ e₂ => closedModulo θ Y e₀ ∧ closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
+  | .tApp e => closedModulo θ Y e
+  | .tLam e => closedModulo θ Y e
+  | .pack e => closedModulo θ Y e
+  | .unpack b e₁ e₂ => closedModulo θ Y e₁ ∧ closedModulo (binderDelete b θ) (b :b: Y) e₂
+  | .pair e₁ e₂ => closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
+  | .fst e => closedModulo θ Y e
+  | .snd e => closedModulo θ Y e
+  | .injL e => closedModulo θ Y e
+  | .injR e => closedModulo θ Y e
+  | .case e₀ e₁ e₂ => closedModulo θ Y e₀ ∧ closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
+  | .roll e => closedModulo θ Y e
+  | .unroll e => closedModulo θ Y e
+  | .load e => closedModulo θ Y e
+  | .store e₁ e₂ => closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
+  | .new e => closedModulo θ Y e
+
+/-- Descending under a binder preserves closedness of the substitution's range. -/
+theorem substIsClosed_binderDelete (b : Binder) (θ : SubstMap) (Y : List String) :
+    substIsClosed Y θ → substIsClosed (b :b: Y) (binderDelete b θ) := by
+  intro hθ x e hget
+  cases b with
+  | bAnon => exact hθ x e hget
+  | bNamed name =>
+    exact closed_weaken (substIsClosed_delete name hθ x e hget) fun y hy => .tail _ hy
+
+/-- `substMap θ e` is `Y`-closed as soon as `θ`'s range is `Y`-closed and `θ` covers every free
+variable of `e` outside `Y`. -/
+theorem substMap_closed_of_closedModulo (θ : SubstMap) (Y : List String) (e : Expr)
+    (hθ : substIsClosed Y θ) (hcov : closedModulo θ Y e) : closed Y (substMap θ e) := by
+  induction e generalizing θ Y with
+  | lit _ => rfl
+  | var y =>
+    simp only [substMap]
+    cases hget : get? (M := MapStr) θ y with
+    | some v => exact hθ y v hget
+    | none =>
+      simp only [closedModulo, hget, ne_eq, not_true_eq_false, or_false] at hcov
+      simpa [closed, Expr.isClosed] using hcov
+  | lam b _ ih => exact ih _ _ (substIsClosed_binderDelete b θ Y hθ) hcov
+  | unpack b _ _ ih₁ ih₂ =>
+    simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true]
+    exact ⟨ih₁ θ Y hθ hcov.1, ih₂ _ _ (substIsClosed_binderDelete b θ Y hθ) hcov.2⟩
+  | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+    exact ih θ Y hθ hcov
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+    simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true]
+    exact ⟨ih₁ θ Y hθ hcov.1, ih₂ θ Y hθ hcov.2⟩
+  | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
+    simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true]
+    exact ⟨⟨ih₀ θ Y hθ hcov.1, ih₁ θ Y hθ hcov.2.1⟩, ih₂ θ Y hθ hcov.2.2⟩
+
+/-- Descending under a binder preserves coverage of the variables outside `Y`. -/
+private theorem coverage_binderDelete {b : Binder} {θ : SubstMap} {Y : List String}
+    (hcov : ∀ y, y ∉ Y → get? (M := MapStr) θ y ≠ none) :
+    ∀ y, y ∉ (b :b: Y) → get? (M := MapStr) (binderDelete b θ) y ≠ none := by
+  cases b with
+  | bAnon => exact hcov
+  | bNamed name =>
+    intro y hnotmem
+    simp only [Binder.cons, List.mem_cons, not_or] at hnotmem
+    rw [binderDelete, LawfulPartialMap.get?_delete_ne (M := MapStr) fun h => hnotmem.1 h.symm]
+    exact hcov y hnotmem.2
+
+/-- A substitution covering every variable outside `Y` makes every expression `closedModulo`. -/
+theorem closedModulo_of_coverage (θ : SubstMap) (Y : List String) (e : Expr)
+    (hcov : ∀ y, y ∉ Y → get? (M := MapStr) θ y ≠ none) : closedModulo θ Y e := by
+  induction e generalizing θ Y with
+  | lit _ => exact trivial
+  | var y =>
+    by_cases hy : y ∈ Y
+    · exact .inl hy
+    · exact .inr (hcov y hy)
+  | lam _ _ ih => exact ih _ _ (coverage_binderDelete hcov)
+  | unpack _ _ _ ih₁ ih₂ => exact ⟨ih₁ θ Y hcov, ih₂ _ _ (coverage_binderDelete hcov)⟩
+  | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+    exact ih θ Y hcov
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+    exact ⟨ih₁ θ Y hcov, ih₂ θ Y hcov⟩
+  | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
+    exact ⟨ih₀ θ Y hcov, ih₁ θ Y hcov, ih₂ θ Y hcov⟩
 
 end SystemFMuState
