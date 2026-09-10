@@ -383,7 +383,8 @@ theorem hoare_neq_num (n m : Int) :
 
 /-! ## Example: factorial -/
 
-def fac : Val := hl_val(rec fac n := if n = #(0 : Int) then #(1 : Int) else n * fac (n - #(1 : Int)))
+def fac : Val :=
+  hl_val(rec fac n := if n = #(0 : Int) then #(1 : Int) else n * fac (n - #(1 : Int)))
 
 /-- The Lean-level factorial that `fac` is proved to compute. -/
 def Fac : Nat → Int

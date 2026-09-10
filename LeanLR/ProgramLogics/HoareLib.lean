@@ -11,9 +11,10 @@ Iris behind a small, named set of rules, so that `hoare.v` and `ipm.v` can be wo
 
 Two things differ from Rocq, both recorded in `CORRESPONDENCE.md` §5.4:
 
-* The course forks Iris to get a sequential two-mask `WP e @ s; E₁, E₂ {{Φ}}` and later-free heap
-  laws. `iris-lean` ships the upstream concurrent, single-mask `WP e @ s; E {{Φ}}`; since nothing
-  outside `sequential_wp.v` uses `E₁ ≠ E₂`, the rules below are unchanged in shape.
+* The course forks Iris to get a sequential two-mask `WP e @ s; E₁, E₂ {{Φ}}`. `iris-lean` ships
+  the upstream concurrent, single-mask `WP e @ s; E {{Φ}}`; since nothing outside
+  `sequential_wp.v` uses `E₁ ≠ E₂`, the rules below are unchanged in shape. The two-mask layer
+  itself is `SequentialWp.lean`, and its heap laws are `HeapLang/NoLater.lean`.
 * `iris-lean`'s heap maps `Loc` to `Option Val`, so the points-to assertion reads `l ↦ some v`
   where Rocq writes `l ↦ v`.
 
@@ -415,9 +416,8 @@ theorem ent_wp_bind (K : Exp → Exp) [Language.Context K] {e : Exp} (Φ : Val �
 
 /-! ### Heap rules
 
-`iris-lean`'s heap laws already carry the `▷`, so these are the course's `ent_later_wp_*` family;
-the later-free versions of `hoare_lib.v` correspond to `heap_lang/primitive_laws_nolater.v`, which
-this port does not reproduce (`CORRESPONDENCE.md` §5.4). -/
+`iris-lean`'s heap laws carry the `▷`, so these are the course's `ent_later_wp_*` family. Its
+later-free `ent_wp_*` are stated over the sequential WP and live in `HeapLang/NoLater.lean`. -/
 
 theorem ent_later_wp_new (v : Val) (Φ : Val → IProp GF) :
     iprop(▷ ∀ l : Loc, l ↦ some v -∗ Φ hl_val(#l)) ⊢ WP hl(ref(v(&v))) {{ Φ }} := by

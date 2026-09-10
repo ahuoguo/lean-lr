@@ -1,3 +1,4 @@
+import Iris.ProgramLogic.Lifting
 import Iris.ProgramLogic.WeakestPre
 import Iris.Instances.Lib.Invariants
 import Iris.ProofMode
@@ -41,11 +42,17 @@ opened *before* the first step and closed again *after* the last one, ending in 
 def swp (s : Stuckness) (E₁ E₂ : CoPset) (e : Expr) (Φ : Val → IProp GF) : IProp GF :=
   iprop(|={E₁, ∅}=> WP e @ s ; (∅ : CoPset) {{ v, |={∅, E₂}=> Φ v }})
 
-@[inherit_doc] notation:max "SWP " e " @ " s "; " E₁ ", " E₂ " {{ " Φ " }}" => swp s E₁ E₂ e Φ
+-- The braces are spelled `" {" noWs "{ "`, exactly as `Iris.BI.WeakestPre` spells them: a
+-- `" {{ "` literal would register `{{` as a single token and break Iris's own `WP e {{ Φ }}`
+-- parser in every file that imports this one.
+syntax:max "SWP " term:max " @ " term:max "; " term:max ", " term:max
+  " {" noWs "{ " term " }" noWs "} " : term
+syntax:max "SWP " term:max " @ " term:max "; " term:max ", " term:max
+  " {" noWs "{ " ident ", " term " }" noWs "} " : term
 
-@[inherit_doc]
-notation:max "SWP " e " @ " s "; " E₁ ", " E₂ " {{ " v ", " Q " }}" =>
-  swp s E₁ E₂ e (fun v => iprop(Q))
+macro_rules
+  | `(SWP $e @ $s; $E₁, $E₂ {{ $v:ident, $Φ }}) => `(swp $s $E₁ $E₂ $e (fun $v => iprop($Φ)))
+  | `(SWP $e @ $s; $E₁, $E₂ {{ $Φ:term }}) => `(swp $s $E₁ $E₂ $e $Φ)
 
 /-! ## The primitive rules -/
 
@@ -321,6 +328,53 @@ instance elimAcc_swp_nonatomic {X : Type} {E₀ : CoPset} {α β : X → IProp G
       iapply HΦ $$ Hclose
 
 end Swp
+
+/-! ## Pure steps
+
+The sequential WP absorbs the `▷` that `wp_pure_step_later` demands: the later can be introduced
+underneath the opening `|={E,∅}=>`, so the rules below are later-free, as the course's are. -/
+
+section PureSteps
+
+variable {hlc : outParam HasLC} {Expr State Obs Val : Type _}
+variable [Λ : Language Expr State Obs Val] [Inhabited State]
+variable {GF : BundledGFunctors} [ι : IrisGS_gen hlc Expr GF]
+variable {s : Stuckness} {E : CoPset} {e e' : Expr} {Φ : Val → IProp GF}
+
+/-- A pure step may be taken under a sequential WP, with no later left over. -/
+theorem swp_pure_step (h : Language.PureExec True 1 e e') :
+    swp s E E e' Φ ⊢ swp s E E e Φ := by
+  unfold swp
+  refine fupd_mono (Entails.trans ?_ (wp_pure_step_later (n := 1) (Hexec := h) trivial))
+  exact later_intro.trans (later_mono (wand_intro sep_elim_left))
+
+/-- Finitely many pure steps. -/
+theorem swp_pure_steps {n : Nat} (h : Language.PureExec True n e e') :
+    swp s E E e' Φ ⊢ swp s E E e Φ := by
+  unfold swp
+  refine fupd_mono (Entails.trans ?_ (wp_pure_step_later (n := n) (Hexec := h) trivial))
+  exact (laterN_intro n).trans (laterN_mono n (wand_intro sep_elim_left))
+
+/-- The later-carrying form. `swp_pure_step` is stronger as a rule, but this one is what strips
+the `▷` from a Löb hypothesis, so it is the form a recursive-function proof needs. The mask can be
+handed back and taken again around the step, which is what makes it hold at all. -/
+theorem swp_pure_step_later (h : Language.PureExec True 1 e e') :
+    iprop(▷ swp s E E e' Φ) ⊢ swp s E E e Φ := by
+  unfold swp
+  iintro H
+  imod (fupd_mask_subseteq (E2 := (∅ : CoPset)) (by simp)) with Hcl
+  imodintro
+  iapply wp_pure_step_fupd (E₂ := E) (Hexec := h) trivial
+  simp only [Nat.repeat]
+  imod Hcl
+  imodintro
+  inext
+  imod H
+  imodintro
+  iintro _
+  iexact H
+
+end PureSteps
 
 /-! ## Opening an invariant across a whole expression
 

@@ -2,3 +2,15 @@ import LeanLR.ProgramLogics.SequentialWp
 import LeanLR.ProgramLogics.HoareLib
 import LeanLR.ProgramLogics.Hoare
 import LeanLR.ProgramLogics.Ipm
+import LeanLR.ProgramLogics.HeapLang.NoLater
+import LeanLR.ProgramLogics.InvariantLib
+import LeanLR.ProgramLogics.HeapLang.SwpTactics
+import LeanLR.ProgramLogics.IpmPersistency
+import LeanLR.ProgramLogics.LaterLoeb
+import LeanLR.ProgramLogics.Concurrency
+import LeanLR.ProgramLogics.Arc
+import LeanLR.ProgramLogics.RaLib
+import LeanLR.ProgramLogics.ResourceAlgebras1
+import LeanLR.ProgramLogics.GhostTheories
+import LeanLR.ProgramLogics.Oplss
+import LeanLR.ProgramLogics.LogRel
