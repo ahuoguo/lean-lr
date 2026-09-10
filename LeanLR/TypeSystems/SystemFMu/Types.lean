@@ -1,4 +1,4 @@
-import LeanLR.TypeSystems.SystemFMuState.Lang
+import LeanLR.TypeSystems.SystemFMu.Lang
 
 import Iris.Std.PartialMap
 import Iris.Std.HeapInstances
@@ -12,25 +12,9 @@ Types use De Bruijn indices for type variables, so type substitution is spelled 
 
 open Iris.Std
 
-namespace SystemFMuState
+namespace SystemFMu
 
 /-! ## Types -/
-
-/-- First-order types: the only types whose values may be stored in the heap. They contain no
-type variables, so they are closed under `Ty.rename` and `Ty.substTy`.
-
-`Ty.ref` takes an `FoTy` rather than a `Ty` restricted to be first-order. The latter breaks the
-lemma that moves a type substitution through the logical relation (`valRel_substTy`): `A.substTy σ`
-can be first-order even when `A` is not, since `A` may be a type variable, so the two sides of the
-equivalence fail to line up. Carving out the first-order types up front stops type substitution
-from descending below a `ref` at all. -/
-inductive FoTy where
-  | int
-  | bool
-  | unit
-  | prod (a b : FoTy)
-  | sum (a b : FoTy)
-  deriving Repr, DecidableEq
 
 /-- Types, with type variables as De Bruijn indices. `all`, `exist` and `mu` each bind one type
 variable in their body. -/
@@ -45,19 +29,7 @@ inductive Ty where
   | prod (A B : Ty)
   | sum (A B : Ty)
   | mu (A : Ty)
-  | ref (a : FoTy)
   deriving Repr, DecidableEq
-
-/-- Embeds the first-order types into the general types. -/
-def FoTy.toTy : FoTy → Ty
-  | .int => .int
-  | .bool => .bool
-  | .unit => .unit
-  | .prod a b => .prod a.toTy b.toTy
-  | .sum a b => .sum a.toTy b.toTy
-
-/-- Coerces an `FoTy` to the `Ty` it denotes. -/
-instance : Coe FoTy Ty := ⟨FoTy.toTy⟩
 
 /-- `TypeWf n A` says every type variable of `A` is bound: free indices are below `n`, the number
 of type variables in scope. -/
@@ -72,7 +44,6 @@ inductive TypeWf : Nat → Ty → Prop where
   | prod_wf : TypeWf n A → TypeWf n B → TypeWf n (.prod A B)
   | sum_wf : TypeWf n A → TypeWf n B → TypeWf n (.sum A B)
   | mu_wf : TypeWf (n + 1) A → TypeWf n (.mu A)
-  | ref_wf : TypeWf n (.ref a)
 
 /-! ## Renaming and substitution -/
 
@@ -88,7 +59,6 @@ def Ty.rename (f : Nat → Nat) : Ty → Ty
   | .prod A B => .prod (A.rename f) (B.rename f)
   | .sum A B => .sum (A.rename f) (B.rename f)
   | .mu A => .mu (A.rename (fun n => match n with | 0 => 0 | n+1 => (f n) + 1))
-  | .ref a => .ref a
 
 /-- Applies the type substitution `σ` to the free type variables of a type, lifting `σ` under each
 binder. -/
@@ -105,7 +75,6 @@ def Ty.substTy (σ : Nat → Ty) : Ty → Ty
   | .prod A B => .prod (A.substTy σ) (B.substTy σ)
   | .sum A B => .sum (A.substTy σ) (B.substTy σ)
   | .mu A => .mu (A.substTy (fun n => match n with | 0 => .tVar 0 | n+1 => (σ n).rename (· + 1)))
-  | .ref a => .ref a
 
 /-- `A.subst1 B` is `A[0 := B]`: replaces type variable `0` in `A` by `B` and shifts the rest
 down. -/
@@ -121,7 +90,7 @@ theorem Ty.rename_ext (A : Ty) :
     ∀ (f g : Nat → Nat), (∀ n, f n = g n) → A.rename f = A.rename g := by
   induction A with
   | tVar n => intro f g h; simp only [Ty.rename, h n]
-  | int | bool | unit | ref _ => intro _ _ _; rfl
+  | int | bool | unit => intro _ _ _; rfl
   | fn _ _ ihA ihB | prod _ _ ihA ihB | sum _ _ ihA ihB =>
     intro f g h
     simp only [Ty.rename, ihA f g h, ihB f g h]
@@ -137,7 +106,7 @@ theorem Ty.substTy_ext (A : Ty) :
     ∀ (σ τ : Nat → Ty), (∀ n, σ n = τ n) → A.substTy σ = A.substTy τ := by
   induction A with
   | tVar n => intro σ τ h; simp only [Ty.substTy, h n]
-  | int | bool | unit | ref _ => intro _ _ _; rfl
+  | int | bool | unit => intro _ _ _; rfl
   | fn _ _ ihA ihB | prod _ _ ihA ihB | sum _ _ ihA ihB =>
     intro σ τ h
     simp only [Ty.substTy, ihA σ τ h, ihB σ τ h]
@@ -152,7 +121,7 @@ theorem Ty.substTy_ext (A : Ty) :
 theorem Ty.rename_rename (A : Ty) (f g : Nat → Nat) :
     (A.rename g).rename f = A.rename (fun n => f (g n)) := by
   induction A generalizing f g with
-  | tVar _ | int | bool | unit | ref _ => rfl
+  | tVar _ | int | bool | unit => rfl
   | fn _ _ ihA ihB | prod _ _ ihA ihB | sum _ _ ihA ihB => simp only [Ty.rename, ihA, ihB]
   | all _ ih | exist _ ih | mu _ ih =>
     simp only [Ty.rename, ih]
@@ -162,7 +131,7 @@ theorem Ty.rename_rename (A : Ty) (f g : Nat → Nat) :
 theorem Ty.rename_substTy (A : Ty) (σ : Nat → Ty) (g : Nat → Nat) :
     (A.rename g).substTy σ = A.substTy (fun n => σ (g n)) := by
   induction A generalizing σ g with
-  | tVar _ | int | bool | unit | ref _ => rfl
+  | tVar _ | int | bool | unit => rfl
   | fn _ _ ihA ihB | prod _ _ ihA ihB | sum _ _ ihA ihB =>
     simp only [Ty.rename, Ty.substTy, ihA, ihB]
   | all _ ih | exist _ ih | mu _ ih =>
@@ -173,7 +142,7 @@ theorem Ty.rename_substTy (A : Ty) (σ : Nat → Ty) (g : Nat → Nat) :
 theorem Ty.substTy_rename (A : Ty) (σ : Nat → Ty) (f : Nat → Nat) :
     (A.substTy σ).rename f = A.substTy (fun n => (σ n).rename f) := by
   induction A generalizing σ f with
-  | tVar _ | int | bool | unit | ref _ => rfl
+  | tVar _ | int | bool | unit => rfl
   | fn _ _ ihA ihB | prod _ _ ihA ihB | sum _ _ ihA ihB =>
     simp only [Ty.rename, Ty.substTy, ihA, ihB]
   | all _ ih | exist _ ih | mu _ ih =>
@@ -186,7 +155,7 @@ theorem Ty.substTy_rename (A : Ty) (σ : Nat → Ty) (f : Nat → Nat) :
 /-- The identity substitution acts as the identity. -/
 theorem Ty.substTy_id (A : Ty) : A.substTy (fun n => .tVar n) = A := by
   induction A with
-  | tVar _ | int | bool | unit | ref _ => rfl
+  | tVar _ | int | bool | unit => rfl
   | fn _ _ ihA ihB | prod _ _ ihA ihB | sum _ _ ihA ihB => simp only [Ty.substTy, ihA, ihB]
   | all _ ih | exist _ ih | mu _ ih =>
     simp only [Ty.substTy]
@@ -213,7 +182,7 @@ theorem Ty.up_substTy_comm (σ τ : Nat → Ty) : ∀ n,
 theorem Ty.substTy_substTy (A : Ty) (σ τ : Nat → Ty) :
     (A.substTy σ).substTy τ = A.substTy (fun n => (σ n).substTy τ) := by
   induction A generalizing σ τ with
-  | tVar _ | int | bool | unit | ref _ => rfl
+  | tVar _ | int | bool | unit => rfl
   | fn _ _ ihA ihB | prod _ _ ihA ihB | sum _ _ ihA ihB => simp only [Ty.substTy, ihA, ihB]
   | all _ ih | exist _ ih | mu _ ih =>
     simp only [Ty.substTy, ih]
@@ -267,7 +236,6 @@ theorem TypeWf.rename (f : Nat → Nat) (n n' : Nat) (A : Ty)
   | int_wf => exact .int_wf
   | bool_wf => exact .bool_wf
   | unit_wf => exact .unit_wf
-  | ref_wf => exact .ref_wf
   | fn_wf _ _ ihA ihB => exact .fn_wf (ihA f n' hf) (ihB f n' hf)
   | prod_wf _ _ ihA ihB => exact .prod_wf (ihA f n' hf) (ihB f n' hf)
   | sum_wf _ _ ihA ihB => exact .sum_wf (ihA f n' hf) (ihB f n' hf)
@@ -297,7 +265,6 @@ theorem TypeWf.substTy (σ : Nat → Ty) (n n' : Nat) (A : Ty)
   | int_wf => exact .int_wf
   | bool_wf => exact .bool_wf
   | unit_wf => exact .unit_wf
-  | ref_wf => exact .ref_wf
   | fn_wf _ _ ihA ihB => exact .fn_wf (ihA σ n' hσ) (ihB σ n' hσ)
   | prod_wf _ _ ihA ihB => exact .prod_wf (ihA σ n' hσ) (ihB σ n' hσ)
   | sum_wf _ _ ihA ihB => exact .sum_wf (ihA σ n' hσ) (ihB σ n' hσ)
@@ -322,7 +289,6 @@ theorem TypeWf.mono {A : Ty} {n : Nat} (h : TypeWf n A) (m : Nat) (hle : n ≤ m
   | int_wf => exact .int_wf
   | bool_wf => exact .bool_wf
   | unit_wf => exact .unit_wf
-  | ref_wf => exact .ref_wf
   | fn_wf _ _ ihA ihB => exact .fn_wf (ihA m hle) (ihB m hle)
   | prod_wf _ _ ihA ihB => exact .prod_wf (ihA m hle) (ihB m hle)
   | sum_wf _ _ ihA ihB => exact .sum_wf (ihA m hle) (ihB m hle)
@@ -335,28 +301,6 @@ theorem TypeWf.subst1_mu (A : Ty) (m : Nat) (hwf : TypeWf m (.mu A)) :
     TypeWf m (Ty.subst1 A (.mu A)) :=
   match hwf with
   | .mu_wf h => TypeWf.subst1 A (.mu A) m h hwf
-
-/-- First-order types are closed, hence well-formed at every level. -/
-theorem TypeWf.foTy (a : FoTy) (n : Nat) : TypeWf n a.toTy := by
-  induction a generalizing n with
-  | int => exact .int_wf
-  | bool => exact .bool_wf
-  | unit => exact .unit_wf
-  | prod _ _ iha ihb => exact .prod_wf (iha n) (ihb n)
-  | sum _ _ iha ihb => exact .sum_wf (iha n) (ihb n)
-
-/-- First-order types contain no type variables, so renaming leaves their embedding untouched. -/
-theorem FoTy.toTy_rename (a : FoTy) (f : Nat → Nat) : a.toTy.rename f = a.toTy := by
-  induction a with
-  | int | bool | unit => rfl
-  | prod _ _ iha ihb | sum _ _ iha ihb => simp only [FoTy.toTy, Ty.rename, iha, ihb]
-
-/-- First-order types contain no type variables, so substitution leaves their embedding
-untouched. -/
-theorem FoTy.toTy_substTy (a : FoTy) (σ : Nat → Ty) : a.toTy.substTy σ = a.toTy := by
-  induction a with
-  | int | bool | unit => rfl
-  | prod _ _ iha ihb | sum _ _ iha ihb => simp only [FoTy.toTy, Ty.substTy, iha, ihb]
 
 /-! ## Typing contexts -/
 
@@ -411,10 +355,6 @@ theorem shiftCtx_get?_ne_none (Γ : TypingContext) (x : String) :
   rw [shiftCtx_get?]
   cases get? (M := TyMapStr) Γ x <;> simp
 
-/-- Assigns types to heap locations, indexed by location. It is carried along by `SynTyped` but
-never constrains it: no typing rule inspects it. -/
-abbrev HeapContext := List Ty
-
 /-! ## Typing judgment -/
 
 /-- `UnOpTyped op A B` says `op` sends an argument of type `A` to a result of type `B`. -/
@@ -432,222 +372,91 @@ inductive BinOpTyped : BinOp → Ty → Ty → Ty → Prop where
   | le_typed : BinOpTyped .leOp .int .int .bool
   | eq_typed : BinOpTyped .eqOp .int .int .bool
 
-/-- `SynTyped n Γ hctx e A` is the syntactic typing judgment: `e` has type `A` with `n` type
-variables in scope, term variables typed by `Γ`, and heap locations typed by `hctx`. -/
-inductive SynTyped : Nat → TypingContext → HeapContext → Expr → Ty → Prop where
-  | typed_lit_int n Γ hctx (z : Int) :
-      SynTyped n Γ hctx (.lit (.litInt z)) .int
-  | typed_lit_bool n Γ hctx (b : Bool) :
-      SynTyped n Γ hctx (.lit (.litBool b)) .bool
-  | typed_lit_unit n Γ hctx :
-      SynTyped n Γ hctx (.lit .litUnit) .unit
-  | typed_var n Γ hctx (x : String) A :
+/-- `SynTyped n Γ e A` is the syntactic typing judgment: `e` has type `A` with `n` type
+variables in scope and term variables typed by `Γ`. -/
+inductive SynTyped : Nat → TypingContext → Expr → Ty → Prop where
+  | typed_lit_int n Γ (z : Int) :
+      SynTyped n Γ (.lit (.litInt z)) .int
+  | typed_lit_bool n Γ (b : Bool) :
+      SynTyped n Γ (.lit (.litBool b)) .bool
+  | typed_lit_unit n Γ :
+      SynTyped n Γ (.lit .litUnit) .unit
+  | typed_var n Γ (x : String) A :
       get? (M := TyMapStr) Γ x = some A →
-      SynTyped n Γ hctx (.var x) A
-  | typed_lam n Γ hctx (x : String) e A B :
+      SynTyped n Γ (.var x) A
+  | typed_lam n Γ (x : String) e A B :
       TypeWf n A →
-      SynTyped n (insert (M := TyMapStr) Γ x A) hctx e B →
-      SynTyped n Γ hctx (.lam (.bNamed x) e) (.fn A B)
-  | typed_app n Γ hctx e₁ e₂ A B :
-      SynTyped n Γ hctx e₁ (.fn A B) →
-      SynTyped n Γ hctx e₂ A →
-      SynTyped n Γ hctx (.app e₁ e₂) B
-  | typed_tLam n Γ hctx e A :
+      SynTyped n (insert (M := TyMapStr) Γ x A) e B →
+      SynTyped n Γ (.lam (.bNamed x) e) (.fn A B)
+  | typed_lam_anon n Γ e A B :
+      TypeWf n A →
+      SynTyped n Γ e B →
+      SynTyped n Γ (.lam .bAnon e) (.fn A B)
+  | typed_app n Γ e₁ e₂ A B :
+      SynTyped n Γ e₁ (.fn A B) →
+      SynTyped n Γ e₂ A →
+      SynTyped n Γ (.app e₁ e₂) B
+  | typed_tLam n Γ e A :
       -- The context is shifted as we descend under the type variable binder.
-      SynTyped (n + 1) (shiftCtx Γ) hctx e A →
-      SynTyped n Γ hctx (.tLam e) (.all A)
-  | typed_tApp n Γ hctx e A B :
+      SynTyped (n + 1) (shiftCtx Γ) e A →
+      SynTyped n Γ (.tLam e) (.all A)
+  | typed_tApp n Γ e A B :
       TypeWf n B →
-      SynTyped n Γ hctx e (.all A) →
-      SynTyped n Γ hctx (.tApp e) (A.subst1 B)
-  | typed_pack n Γ hctx e A B :
+      SynTyped n Γ e (.all A) →
+      SynTyped n Γ (.tApp e) (A.subst1 B)
+  | typed_pack n Γ e A B :
       TypeWf n B →
       TypeWf (n + 1) A →
-      SynTyped n Γ hctx e (A.subst1 B) →
-      SynTyped n Γ hctx (.pack e) (.exist A)
-  | typed_unpack n Γ hctx (x : String) e₁ e₂ A B :
+      SynTyped n Γ e (A.subst1 B) →
+      SynTyped n Γ (.pack e) (.exist A)
+  | typed_unpack n Γ (x : String) e₁ e₂ A B :
       TypeWf n B →
-      SynTyped n Γ hctx e₁ (.exist A) →
+      SynTyped n Γ e₁ (.exist A) →
       -- `Γ` and the result type `B` are shifted; `A` already lives under this binder.
-      SynTyped (n + 1) (insert (M := TyMapStr) (shiftCtx Γ) x A) hctx e₂
+      SynTyped (n + 1) (insert (M := TyMapStr) (shiftCtx Γ) x A) e₂
         (B.rename (· + 1)) →
-      SynTyped n Γ hctx (.unpack (.bNamed x) e₁ e₂) B
-  | typed_pair n Γ hctx e₁ e₂ A B :
-      SynTyped n Γ hctx e₁ A →
-      SynTyped n Γ hctx e₂ B →
-      SynTyped n Γ hctx (.pair e₁ e₂) (.prod A B)
-  | typed_fst n Γ hctx e A B :
-      SynTyped n Γ hctx e (.prod A B) →
-      SynTyped n Γ hctx (.fst e) A
-  | typed_snd n Γ hctx e A B :
-      SynTyped n Γ hctx e (.prod A B) →
-      SynTyped n Γ hctx (.snd e) B
-  | typed_injL n Γ hctx e A B :
+      SynTyped n Γ (.unpack (.bNamed x) e₁ e₂) B
+  | typed_pair n Γ e₁ e₂ A B :
+      SynTyped n Γ e₁ A →
+      SynTyped n Γ e₂ B →
+      SynTyped n Γ (.pair e₁ e₂) (.prod A B)
+  | typed_fst n Γ e A B :
+      SynTyped n Γ e (.prod A B) →
+      SynTyped n Γ (.fst e) A
+  | typed_snd n Γ e A B :
+      SynTyped n Γ e (.prod A B) →
+      SynTyped n Γ (.snd e) B
+  | typed_injL n Γ e A B :
       TypeWf n B →
-      SynTyped n Γ hctx e A →
-      SynTyped n Γ hctx (.injL e) (.sum A B)
-  | typed_injR n Γ hctx e A B :
+      SynTyped n Γ e A →
+      SynTyped n Γ (.injL e) (.sum A B)
+  | typed_injR n Γ e A B :
       TypeWf n A →
-      SynTyped n Γ hctx e B →
-      SynTyped n Γ hctx (.injR e) (.sum A B)
-  | typed_case n Γ hctx e e₁ e₂ A B C :
-      SynTyped n Γ hctx e (.sum A B) →
-      SynTyped n Γ hctx e₁ (.fn A C) →
-      SynTyped n Γ hctx e₂ (.fn B C) →
-      SynTyped n Γ hctx (.case e e₁ e₂) C
-  | typed_unOp n Γ hctx op e A B :
+      SynTyped n Γ e B →
+      SynTyped n Γ (.injR e) (.sum A B)
+  | typed_case n Γ e e₁ e₂ A B C :
+      SynTyped n Γ e (.sum A B) →
+      SynTyped n Γ e₁ (.fn A C) →
+      SynTyped n Γ e₂ (.fn B C) →
+      SynTyped n Γ (.case e e₁ e₂) C
+  | typed_unOp n Γ op e A B :
       UnOpTyped op A B →
-      SynTyped n Γ hctx e A →
-      SynTyped n Γ hctx (.unOp op e) B
-  | typed_binOp n Γ hctx op e₁ e₂ A B C :
+      SynTyped n Γ e A →
+      SynTyped n Γ (.unOp op e) B
+  | typed_binOp n Γ op e₁ e₂ A B C :
       BinOpTyped op A B C →
-      SynTyped n Γ hctx e₁ A →
-      SynTyped n Γ hctx e₂ B →
-      SynTyped n Γ hctx (.binOp op e₁ e₂) C
-  | typed_if n Γ hctx e₀ e₁ e₂ A :
-      SynTyped n Γ hctx e₀ .bool →
-      SynTyped n Γ hctx e₁ A →
-      SynTyped n Γ hctx e₂ A →
-      SynTyped n Γ hctx (.ite e₀ e₁ e₂) A
-  | typed_roll n Γ hctx e A :
-      SynTyped n Γ hctx e (Ty.subst1 A (.mu A)) →
-      SynTyped n Γ hctx (.roll e) (.mu A)
-  | typed_unroll n Γ hctx e A :
-      SynTyped n Γ hctx e (.mu A) →
-      SynTyped n Γ hctx (.unroll e) (Ty.subst1 A (.mu A))
-  -- State operations; only first-order values may be stored, so the content type is an `FoTy`.
-  | typed_new n Γ hctx e (a : FoTy) :
-      SynTyped n Γ hctx e a.toTy →
-      SynTyped n Γ hctx (.new e) (.ref a)
-  | typed_load n Γ hctx e (a : FoTy) :
-      SynTyped n Γ hctx e (.ref a) →
-      SynTyped n Γ hctx (.load e) a.toTy
-  | typed_store n Γ hctx e₁ e₂ (a : FoTy) :
-      SynTyped n Γ hctx e₁ (.ref a) →
-      SynTyped n Γ hctx e₂ a.toTy →
-      SynTyped n Γ hctx (.store e₁ e₂) .unit
-
-/-! ## Typed expressions are closed -/
-
-theorem syn_typed_closed {n : Nat} {Γ : TypingContext} {hctx : HeapContext} {e : Expr}
-    {A : Ty} {X : List String}
-    (ht : SynTyped n Γ hctx e A) (hX : ∀ x, get? (M := TyMapStr) Γ x ≠ none → x ∈ X) :
-    closed X e := by
-  induction ht generalizing X with
-  | typed_lit_int _ _ _ _ | typed_lit_bool _ _ _ _ | typed_lit_unit _ _ _ => rfl
-  | typed_var n Γ _ x A hx =>
-    simp only [closed, Expr.isClosed, decide_eq_true_eq]
-    exact hX x (by rw [hx]; simp)
-  | typed_lam n Γ _ x e A B hA _ ih =>
-    refine ih fun y hy => ?_
-    by_cases hxy : x = y
-    · exact hxy ▸ List.Mem.head _
-    · refine List.Mem.tail _ (hX y ?_)
-      rwa [LawfulPartialMap.get?_insert_ne (M := TyMapStr) hxy] at hy
-    | typed_tLam n Γ _ e A _ ih =>
-    exact ih fun y hy => hX y ((shiftCtx_get?_ne_none Γ y).mp hy)
-  | typed_unpack n Γ _ x e₁ e₂ A B hB _ _ ih₁ ih₂ =>
-    simp only [closed, Expr.isClosed, Bool.and_eq_true]
-    refine ⟨ih₁ hX, ih₂ fun y hy => ?_⟩
-    by_cases hxy : x = y
-    · exact hxy ▸ List.Mem.head _
-    · rw [LawfulPartialMap.get?_insert_ne (M := TyMapStr) hxy] at hy
-      exact List.Mem.tail _ (hX y ((shiftCtx_get?_ne_none Γ y).mp hy))
-  | typed_app n Γ _ e₁ e₂ A B _ _ ih₁ ih₂ | typed_pair n Γ _ e₁ e₂ A B _ _ ih₁ ih₂
-  | typed_store n Γ _ e₁ e₂ a _ _ ih₁ ih₂ =>
-    simp only [closed, Expr.isClosed, Bool.and_eq_true]
-    exact ⟨ih₁ hX, ih₂ hX⟩
-  | typed_binOp n Γ _ op e₁ e₂ A B C _ _ _ ih₁ ih₂ =>
-    simp only [closed, Expr.isClosed, Bool.and_eq_true]
-    exact ⟨ih₁ hX, ih₂ hX⟩
-  | typed_tApp n Γ _ e A B _ _ ih | typed_pack n Γ _ e A B _ _ _ ih
-  | typed_fst n Γ _ e A B _ ih | typed_snd n Γ _ e A B _ ih
-  | typed_injL n Γ _ e A B _ _ ih | typed_injR n Γ _ e A B _ _ ih
-  | typed_unOp n Γ _ op e A B _ _ ih
-  | typed_roll n Γ _ e A _ ih | typed_unroll n Γ _ e A _ ih
-  | typed_new n Γ _ e a _ ih | typed_load n Γ _ e a _ ih => exact ih hX
-  | typed_case n Γ _ e e₁ e₂ A B C _ _ _ ih ih₁ ih₂
-  | typed_if n Γ _ e A e₁ e₂ _ _ _ ih ih₁ ih₂ =>
-    simp only [closed, Expr.isClosed, Bool.and_eq_true]
-    exact ⟨⟨ih hX, ih₁ hX⟩, ih₂ hX⟩
-
-/-! ## Canonical values
-
-`logrel.v`'s canonical-value inversions: a value of a given type has the shape that type
-prescribes. Each is a `cases` on the typing derivation in which every non-value shape is killed by
-the value hypothesis and every wrong value shape by the type equation. The type is generalised
-first, since rules whose conclusion type is a substitution (`typed_tApp`, `typed_unroll`) block
-dependent elimination otherwise. -/
-
-theorem canonical_values_int {n : Nat} {Γ : TypingContext} {hctx : HeapContext} {e : Expr}
-    (ht : SynTyped n Γ hctx e .int) (hv : Expr.isVal e) : ∃ z : Int, e = .lit (.litInt z) := by
-  suffices h : ∀ T : Ty, SynTyped n Γ hctx e T → T = .int → ∃ z : Int, e = .lit (.litInt z) by
-    exact h _ ht rfl
-  intro T ht' hT
-  cases ht' <;>
-    solve
-      | (exfalso; simp [Expr.isVal] at hv)
-      | (exfalso; simp at hT)
-      | exact ⟨_, rfl⟩
-
-theorem canonical_values_bool {n : Nat} {Γ : TypingContext} {hctx : HeapContext} {e : Expr}
-    (ht : SynTyped n Γ hctx e .bool) (hv : Expr.isVal e) : ∃ b : Bool, e = .lit (.litBool b) := by
-  suffices h : ∀ T : Ty, SynTyped n Γ hctx e T → T = .bool → ∃ b : Bool, e = .lit (.litBool b) by
-    exact h _ ht rfl
-  intro T ht' hT
-  cases ht' <;>
-    solve
-      | (exfalso; simp [Expr.isVal] at hv)
-      | (exfalso; simp at hT)
-      | exact ⟨_, rfl⟩
-
-theorem canonical_values_unit {n : Nat} {Γ : TypingContext} {hctx : HeapContext} {e : Expr}
-    (ht : SynTyped n Γ hctx e .unit) (hv : Expr.isVal e) : e = .lit .litUnit := by
-  suffices h : ∀ T : Ty, SynTyped n Γ hctx e T → T = .unit → e = .lit .litUnit by
-    exact h _ ht rfl
-  intro T ht' hT
-  cases ht' <;>
-    solve
-      | (exfalso; simp [Expr.isVal] at hv)
-      | (exfalso; simp at hT)
-      | rfl
-
-theorem canonical_values_prod {n : Nat} {Γ : TypingContext} {hctx : HeapContext} {e : Expr}
-    {A B : Ty} (ht : SynTyped n Γ hctx e (.prod A B)) (hv : Expr.isVal e) :
-    ∃ e₁ e₂, e = .pair e₁ e₂ ∧ Expr.isVal e₁ ∧ Expr.isVal e₂ ∧
-      SynTyped n Γ hctx e₁ A ∧ SynTyped n Γ hctx e₂ B := by
-  suffices h : ∀ T : Ty, SynTyped n Γ hctx e T → T = .prod A B →
-      ∃ e₁ e₂, e = .pair e₁ e₂ ∧ Expr.isVal e₁ ∧ Expr.isVal e₂ ∧
-        SynTyped n Γ hctx e₁ A ∧ SynTyped n Γ hctx e₂ B by
-    exact h _ ht rfl
-  intro T ht' hT
-  cases ht' <;>
-    solve
-      | (exfalso; simp [Expr.isVal] at hv)
-      | (exfalso; simp at hT)
-      | (rename_i hp₁ hp₂
-         simp only [Ty.prod.injEq] at hT
-         obtain ⟨rfl, rfl⟩ := hT
-         exact ⟨_, _, rfl, hv.1, hv.2, hp₁, hp₂⟩)
-
-theorem canonical_values_sum {n : Nat} {Γ : TypingContext} {hctx : HeapContext} {e : Expr}
-    {A B : Ty} (ht : SynTyped n Γ hctx e (.sum A B)) (hv : Expr.isVal e) :
-    (∃ e', e = .injL e' ∧ Expr.isVal e' ∧ SynTyped n Γ hctx e' A) ∨
-    (∃ e', e = .injR e' ∧ Expr.isVal e' ∧ SynTyped n Γ hctx e' B) := by
-  suffices h : ∀ T : Ty, SynTyped n Γ hctx e T → T = .sum A B →
-      (∃ e', e = .injL e' ∧ Expr.isVal e' ∧ SynTyped n Γ hctx e' A) ∨
-      (∃ e', e = .injR e' ∧ Expr.isVal e' ∧ SynTyped n Γ hctx e' B) by
-    exact h _ ht rfl
-  intro T ht' hT
-  cases ht' <;>
-    solve
-      | (exfalso; simp [Expr.isVal] at hv)
-      | (exfalso; simp at hT)
-      | (rename_i _ hinj
-         simp only [Ty.sum.injEq] at hT
-         obtain ⟨rfl, rfl⟩ := hT
-         solve
-           | exact Or.inl ⟨_, rfl, hv, hinj⟩
-           | exact Or.inr ⟨_, rfl, hv, hinj⟩)
-
-end SystemFMuState
+      SynTyped n Γ e₁ A →
+      SynTyped n Γ e₂ B →
+      SynTyped n Γ (.binOp op e₁ e₂) C
+  | typed_if n Γ e₀ e₁ e₂ A :
+      SynTyped n Γ e₀ .bool →
+      SynTyped n Γ e₁ A →
+      SynTyped n Γ e₂ A →
+      SynTyped n Γ (.ite e₀ e₁ e₂) A
+  | typed_roll n Γ e A :
+      SynTyped n Γ e (Ty.subst1 A (.mu A)) →
+      SynTyped n Γ (.roll e) (.mu A)
+  | typed_unroll n Γ e A :
+      SynTyped n Γ e (.mu A) →
+      SynTyped n Γ (.unroll e) (Ty.subst1 A (.mu A))
+end SystemFMu

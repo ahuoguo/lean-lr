@@ -3,7 +3,6 @@
   Defines syntax, values, and basic operations
 -/
 
-
 namespace STLC
 
 inductive Binder where

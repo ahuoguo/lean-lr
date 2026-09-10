@@ -246,37 +246,6 @@ theorem worldExt_mem {W W' : World} {INV : HeapInv} (hext : worldExt W W')
   rw [heq]
   exact List.mem_append_left _ hmem
 
-/-! ## Values and reduction -/
-
-/-- Reading a value back off its own expression succeeds. -/
-theorem toVal?_toExpr : ∀ (v : Val), v.toExpr.toVal? = some v
-  | .litV _ => rfl
-  | .lamV _ _ => rfl
-  | .tLamV _ => rfl
-  | .packV v => by simp [Val.toExpr, Expr.toVal?, toVal?_toExpr v, Option.map]
-  | .pairV v₁ v₂ => by
-    simp [Val.toExpr, Expr.toVal?, toVal?_toExpr v₁, toVal?_toExpr v₂, Option.bind]
-  | .injLV v => by simp [Val.toExpr, Expr.toVal?, toVal?_toExpr v, Option.map]
-  | .injRV v => by simp [Val.toExpr, Expr.toVal?, toVal?_toExpr v, Option.map]
-  | .rollV v => by simp [Val.toExpr, Expr.toVal?, toVal?_toExpr v, Option.map]
-
-/-- A value takes no step in any heap. -/
-theorem val_irreducible (v : Val) (h : Heap) : irreducible v.toExpr h := by
-  intro ⟨e', h', hstep⟩
-  obtain ⟨K, e₁, e₂, hfill, _, hbase⟩ := contextual_step_inv hstep
-  have hval : Expr.isVal (fill K e₁) := hfill ▸ val_isVal v
-  exact fill_val_base_step_absurd K e₁ e₂ h h' hval hbase
-
-/-- A complete reduction starting from a value takes no steps and changes nothing. -/
-theorem nsteps_val_inv (v : Val) (n : Nat) (h : Heap) (e' : Expr) (h' : Heap) :
-    redNsteps n v.toExpr h e' h' → n = 0 ∧ e' = v.toExpr ∧ h' = h := by
-  intro ⟨hsteps, hirred⟩
-  cases hsteps with
-  | zero => exact ⟨rfl, rfl, rfl⟩
-  | step hstep _ =>
-    exfalso
-    exact val_irreducible v h ⟨_, _, hstep⟩
-
 /-! ## Monotonicity
 
 The value relation is downward closed in the step index and upward closed in the world. The index
@@ -770,6 +739,25 @@ theorem exprRel_mono (δ : TyVarInterp) (A : Ty) (k k' : Nat) (W W' : World) (e 
     k' ≤ k → worldExt W W' → exprRel δ A k W e → exprRel δ A k' W' e :=
   fun hk hw he => exprRel_mono_idx δ A k k' W' e hk (exprRel_mono_world δ A k W W' e hw he)
 
+/-- The context relation is downward closed in the index. -/
+theorem semCtxRel_mono_idx (δ : TyVarInterp) (Γ : TypingContext) (k k' : Nat) (W : World)
+    (θ : SubstMap) (hk : k' ≤ k) (h : semCtxRel δ Γ W k θ) : semCtxRel δ Γ W k' θ := by
+  refine ⟨fun x A hlook => ?_, h.2⟩
+  obtain ⟨v, hv, hrel⟩ := h.1 x A hlook
+  exact ⟨v, hv, valRel_mono_idx δ A k k' W v hk hrel⟩
+
+/-- The context relation is upward closed in the world. -/
+theorem semCtxRel_mono_world (δ : TyVarInterp) (Γ : TypingContext) (k : Nat) (W W' : World)
+    (θ : SubstMap) (hext : worldExt W W') (h : semCtxRel δ Γ W k θ) : semCtxRel δ Γ W' k θ := by
+  refine ⟨fun x A hlook => ?_, h.2⟩
+  obtain ⟨v, hv, hrel⟩ := h.1 x A hlook
+  exact ⟨v, hv, valRel_mono_world δ A k W W' v hext hrel⟩
+
+theorem semCtxRel_mono (δ : TyVarInterp) (Γ : TypingContext) (k k' : Nat) (W W' : World)
+    (θ : SubstMap) (hk : k' ≤ k) (hext : worldExt W W') (h : semCtxRel δ Γ W k θ) :
+    semCtxRel δ Γ W' k' θ :=
+  semCtxRel_mono_world δ Γ k' W W' θ hext (semCtxRel_mono_idx δ Γ k k' W θ hk h)
+
 /-- Value inclusion: a related value is a related expression. It reduces in zero steps, so the whole
 step budget survives. -/
 theorem sem_val_expr_rel (δ : TyVarInterp) (A : Ty) (k : Nat) (W : World) (v : Val) :
@@ -803,6 +791,18 @@ theorem expr_det_step_closure (δ : TyVarInterp) (A : Ty) (k : Nat) (W : World) 
   refine ⟨v, W'', hval, hext', hwsat', ?_⟩
   have heq : k - n = k - 1 - (n - 1) := by omega
   rwa [heq]
+
+/-- The multi-step closure of `expr_det_step_closure`. -/
+theorem expr_det_steps_closure (δ : TyVarInterp) (A : Ty) (n : Nat) (e e' : Expr)
+    (hsteps : DetSteps n e e') : ∀ (k : Nat) (W : World), exprRel δ A (k - n) W e' →
+    exprRel δ A k W e := by
+  induction hsteps with
+  | zero => intro k W h; simpa using h
+  | @step e₁ e₂ m e₃ hstep hrest ih =>
+    intro k W h
+    refine expr_det_step_closure δ A k W e₁ e₂ hstep (ih (k - 1) W ?_)
+    have hk : k - 1 - m = k - (m + 1) := by omega
+    rwa [hk]
 
 /-! ## Bind lemma
 
@@ -1186,13 +1186,6 @@ private theorem isVal_toVal? {e : Expr} (hval : Expr.isVal e) : ∃ v : Val, e.t
     obtain ⟨v, hv⟩ := ih hval
     exact ⟨.rollV v, by simp [Expr.toVal?, hv, Option.map]⟩
   | _ => simp [Expr.isVal] at hval
-
-/-- Value expressions are stuck. -/
-private theorem isVal_irreducible {e : Expr} {h : Heap} (hval : Expr.isVal e) :
-    irreducible e h := by
-  obtain ⟨v, hv⟩ := isVal_toVal? hval
-  rw [toVal?_eq hv]
-  exact val_irreducible v h
 
 /-- A reduction out of a value expression takes no steps and changes nothing. -/
 private theorem nsteps_isVal_inv {e : Expr} {h : Heap} {e' : Expr} {h' : Heap} {n : Nat}
@@ -2130,6 +2123,32 @@ compound expression follows the same shape: `bind_item` reduces the subterms to 
 order, the resulting value relation pins down their shape, and `expr_det_step_closure` consumes the
 redex step. -/
 
+/-- The expression relation is closed under application. This is
+`compat_app` stated directly on `exprRel`, without the surrounding substitution. -/
+theorem semantic_app (δ : TyVarInterp) (A B : Ty) (k : Nat) (W : World) (e₁ e₂ : Expr)
+    (hexpr₁ : exprRel δ (.fn A B) k W e₁) (hexpr₂ : exprRel δ A k W e₂) :
+    exprRel δ B k W (.app e₁ e₂) := by
+  change exprRel δ B k W (fillItem (.appRCtx e₁) e₂)
+  apply bind_item δ A B k W (.appRCtx e₁) e₂ hexpr₂
+  intro v₂ j₂ W₂ hj₂ hext₂ hv₂
+  show exprRel δ B (k - j₂) W₂ (.app e₁ v₂.toExpr)
+  change exprRel δ B (k - j₂) W₂ (fillItem (.appLCtx v₂) e₁)
+  have hexpr₁' : exprRel δ (.fn A B) (k - j₂) W₂ e₁ :=
+    exprRel_mono δ (.fn A B) k (k - j₂) W W₂ e₁ (by omega) hext₂ hexpr₁
+  apply bind_item δ (.fn A B) B (k - j₂) W₂ (.appLCtx v₂) e₁ hexpr₁'
+  intro v₁ j₁ W₃ hj₁ hext₃ hv₁
+  cases v₁ with
+  | lamV x body =>
+    simp only [valRel] at hv₁
+    obtain ⟨_, hbody⟩ := hv₁
+    show exprRel δ B (k - j₂ - j₁) W₃ (.app (.lam x body) v₂.toExpr)
+    apply expr_det_step_closure
+    · exact det_step_beta x body v₂.toExpr (val_isVal v₂)
+    · have hv₂' : valRel δ A (k - j₂ - j₁ - 1) W₃ v₂ :=
+        valRel_mono δ A (k - j₂) (k - j₂ - j₁ - 1) W₂ W₃ v₂ (by omega) hext₃ hv₂
+      exact hbody v₂ 1 W₃ (worldExt_refl W₃) hv₂'
+  | _ => simp [valRel] at hv₁
+
 /-- Integer literals. -/
 theorem compat_int (Γ : TypingContext) (z : Int) : semTyped Γ (.lit (.litInt z)) .int := by
   intro δ W k θ hctx
@@ -2207,6 +2226,27 @@ theorem compat_lam (Γ : TypingContext) (x : String) (e : Expr) (A B : Ty)
         exact valRel_closed δ A (k - kd) W' v' hv'
       · rw [LawfulPartialMap.get?_insert_ne (M := MapStr) hxy] at hget
         exact hctx.2 y ey hget
+
+/-- Term abstraction with an anonymous binder. Rocq's `compat_lam_anon`: since the binder binds
+nothing, the body must already be closed once `θ` is applied. -/
+theorem compat_lam_anon (Γ : TypingContext) (e : Expr) (A B : Ty)
+    (hscoped : ∀ θ : SubstMap,
+      (∀ y, get? (M := TyMapStr) Γ y ≠ none → get? (M := MapStr) θ y ≠ none) →
+      closedModulo θ [] e) :
+    semTyped Γ e B → semTyped Γ (.lam .bAnon e) (.fn A B) := by
+  intro hbody δ W k θ hctx
+  show exprRel δ (.fn A B) k W (substMap θ (.lam .bAnon e))
+  change exprRel δ (.fn A B) k W (Val.lamV .bAnon (substMap (binderDelete .bAnon θ) e)).toExpr
+  apply sem_val_expr_rel
+  show valRel δ (.fn A B) k W (Val.lamV .bAnon (substMap (binderDelete .bAnon θ) e))
+  simp only [valRel, binderDelete]
+  refine ⟨?_, ?_⟩
+  · exact substMap_closed_of_closedModulo θ [] e (semCtxRel_substIsClosed δ Γ W k θ hctx)
+      (hscoped θ (semCtxRel_covers δ Γ W k θ hctx))
+  · intro v' kd W' hext' _
+    show exprRel δ B (k - kd) W' (subst' .bAnon v'.toExpr (substMap θ e))
+    simp only [subst', id]
+    exact hbody δ W' (k - kd) θ (semCtxRel_mono δ Γ k (k - kd) W W' θ (by omega) hext' hctx)
 
 /-- Application. Arguments are evaluated before functions, so `e₂` is bound first. -/
 theorem compat_app (Γ : TypingContext) (e₁ e₂ : Expr) (A B : Ty) :
@@ -2605,6 +2645,20 @@ theorem foValRel_valRel (a : FoTy) (δ : TyVarInterp) (k : Nat) (W : World) (v :
     | _ => simp [foValRel, FoTy.toTy, valRel]
 
 /-! ## World satisfaction -/
+
+/-- The empty world is satisfied by the empty heap. -/
+theorem wsat_init_heap : wsat ([] : World) Heap.empty :=
+  ⟨Heap.bounded_empty, fun _ hmem => absurd hmem List.not_mem_nil,
+    fun _ hmem => absurd hmem List.not_mem_nil⟩
+
+/-- World satisfaction restricts along world extension, since extending a
+world only appends invariants. -/
+theorem wsat_wext {W W' : World} {h : Heap} (hext : worldExt W W') (hsat : wsat W' h) :
+    wsat W h := by
+  obtain ⟨Wn, rfl⟩ := hext
+  refine ⟨hsat.1, fun INV hmem => hsat.2.1 INV (List.mem_append_left _ hmem), ?_⟩
+  intro INV₁ h₁ INV₂ h₂ heq
+  exact hsat.2.2 INV₁ (List.mem_append_left _ h₁) INV₂ (List.mem_append_left _ h₂) heq
 
 /-- Reads off the invariant for a location recorded in the world. -/
 theorem wsat_lookup {W : World} {h : Heap} {INV : HeapInv}
@@ -3011,5 +3065,14 @@ theorem type_safety {e e' : Expr} {A : Ty} {n h'} :
   obtain ⟨v, _, hval, _, _, _⟩ :=
     hexpr e' Heap.empty h' n [] hextW hwsat (Nat.lt_succ_of_le Nat.le.refl) hred
   exact toVal?_isVal hval
+
+def safe (e : Expr) (h : Heap) : Prop :=
+  ∀ (e' : Expr) (h' : Heap) (n : Nat), redNsteps n e h e' h' → Expr.isVal e'
+
+/-- `type_safety` in Rocq's packaging, through the `safe` predicate. -/
+theorem type_safety_safe {e : Expr} {A : Ty}
+    (hty : SynTyped 0 (PartialMap.empty (M := TyMapStr) (V := Ty)) [] e A) :
+    safe e Heap.empty :=
+  fun _ _ _ hred => type_safety hty hred
 
 end SystemFMuState

@@ -51,7 +51,6 @@ def Context.domList (Γ : Context) : List String :=
 def Context.dom (Γ : Context) : StringSet :=
   FiniteMap.dom_set (M := MapStr) Γ
 
-
 inductive SynTyped : Context → Expr → Ty → Prop where
   | var : ∀ {Γ x A},
       Γ.lookup x = some A →
@@ -64,7 +63,7 @@ inductive SynTyped : Context → Expr → Ty → Prop where
   | app : ∀ {Γ e₁ e₂ A B},
       SynTyped Γ e₁ (A ⇒ B) →
       SynTyped Γ e₂ A →
-      SynTyped Γ (e₁ e₂) B
+      SynTyped Γ (Expr.app e₁ e₂) B
 
   | litInt : ∀ {Γ n},
       SynTyped Γ (Expr.litInt n) Ty.int

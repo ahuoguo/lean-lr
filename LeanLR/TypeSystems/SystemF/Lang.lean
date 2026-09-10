@@ -1,36 +1,19 @@
 /-!
-# System F with recursive types and mutable state: language definition
+# System F: language definition
 
 Syntax, values, substitution, evaluation contexts, and the contextual operational semantics.
+
+This is `SystemFMu.Lang` without recursive types: no `roll`/`unroll` and no `rollV`.
 -/
 
-namespace SystemFMuState
+namespace SystemF
 
 /-! ## Syntax -/
-
-/-- A heap address. -/
-structure Loc where
-  loc : Int
-  deriving Repr, DecidableEq, Hashable
-
-instance : Inhabited Loc := ⟨⟨0⟩⟩
-
-def Loc.add (l : Loc) (off : Int) : Loc := ⟨l.loc + off⟩
-
-/-- Offsets a location by an integer, enabling `l + off`. -/
-instance : HAdd Loc Int Loc := ⟨Loc.add⟩
-
-/-- Offsetting a location is injective in the location. -/
-theorem Loc.add_inj {l l' : Loc} (off : Int) (h : l.add off = l'.add off) : l = l' := by
-  cases l; cases l'
-  simp only [Loc.add, Loc.mk.injEq] at h ⊢
-  omega
 
 inductive BaseLit where
   | litInt (n : Int)
   | litBool (b : Bool)
   | litUnit
-  | litLoc (l : Loc)
   deriving Repr, DecidableEq
 
 inductive UnOp where
@@ -80,13 +63,6 @@ inductive Expr where
   | injL (e : Expr)
   | injR (e : Expr)
   | case (e₀ e₁ e₂ : Expr)
-  -- Isorecursive types
-  | roll (e : Expr)
-  | unroll (e : Expr)
-  -- Mutable state
-  | load (e : Expr)
-  | store (e₁ e₂ : Expr)
-  | new (e : Expr)
   deriving Repr
 
 inductive Val where
@@ -97,7 +73,6 @@ inductive Val where
   | pairV (v₁ v₂ : Val)
   | injLV (v : Val)
   | injRV (v : Val)
-  | rollV (v : Val)
   deriving Repr
 
 /-- Injects a value into the expressions. -/
@@ -109,7 +84,6 @@ def Val.toExpr : Val → Expr
   | .pairV v₁ v₂ => .pair v₁.toExpr v₂.toExpr
   | .injLV v => .injL v.toExpr
   | .injRV v => .injR v.toExpr
-  | .rollV v => .roll v.toExpr
 
 /-- Partial inverse of `Val.toExpr`: returns `some v` exactly when the expression is a value. -/
 def Expr.toVal? : Expr → Option Val
@@ -123,7 +97,6 @@ def Expr.toVal? : Expr → Option Val
     return .pairV v₁ v₂
   | .injL e => e.toVal?.map Val.injLV
   | .injR e => e.toVal?.map Val.injRV
-  | .roll e => e.toVal?.map Val.rollV
   | _ => none
 
 /-- `e.isVal` holds exactly when `e` is in the image of `Val.toExpr`. Stated as a `Prop` rather
@@ -136,7 +109,6 @@ def Expr.isVal : Expr → Prop
   | .pair e₁ e₂ => e₁.isVal ∧ e₂.isVal
   | .injL e => e.isVal
   | .injR e => e.isVal
-  | .roll e => e.isVal
   | _ => False
 
 /-! ## Substitution -/
@@ -162,30 +134,12 @@ def subst (x : String) (es : Expr) : Expr → Expr
   | .injL e => .injL (subst x es e)
   | .injR e => .injR (subst x es e)
   | .case e₀ e₁ e₂ => .case (subst x es e₀) (subst x es e₁) (subst x es e₂)
-  | .roll e => .roll (subst x es e)
-  | .unroll e => .unroll (subst x es e)
-  | .load e => .load (subst x es e)
-  | .store e₁ e₂ => .store (subst x es e₁) (subst x es e₂)
-  | .new e => .new (subst x es e)
 
 /-- Substitution for a binder; the anonymous binder substitutes nothing. -/
 def subst' (b : Binder) (es : Expr) : Expr → Expr :=
   match b with
   | .bNamed x => subst x es
   | .bAnon => id
-
-/-! ## Heaps -/
-
-/-- Heaps map locations to values. Since a heap is a total function it has no finite domain of
-its own; a location is unallocated in `h` exactly when `h l = none`. -/
-abbrev Heap := Loc → Option Val
-
-/-- The heap in which every location is unallocated. -/
-def Heap.empty : Heap := fun _ => none
-
-/-- Pointwise heap update: `h` with `l` remapped to `v`. -/
-def Heap.insert (h : Heap) (l : Loc) (v : Val) : Heap :=
-  fun l' => if l' = l then some v else h l'
 
 /-! ## Operational semantics -/
 
@@ -226,12 +180,6 @@ inductive EctxItem where
   | injLCtx
   | injRCtx
   | caseCtx (e₁ e₂ : Expr)
-  | rollCtx
-  | unrollCtx
-  | loadCtx
-  | storeLCtx (v : Val)
-  | storeRCtx (e : Expr)
-  | newCtx
 
 /-- An evaluation context, innermost frame first. -/
 abbrev Ectx := List EctxItem
@@ -255,77 +203,70 @@ def fillItem (Ki : EctxItem) (e : Expr) : Expr :=
   | .injLCtx => .injL e
   | .injRCtx => .injR e
   | .caseCtx e₁ e₂ => .case e e₁ e₂
-  | .rollCtx => .roll e
-  | .unrollCtx => .unroll e
-  | .loadCtx => .load e
-  | .storeLCtx v => .store e v.toExpr
-  | .storeRCtx e₁ => .store e₁ e
-  | .newCtx => .new e
 
 /-- Plugs an expression into a context, applying the frames from the inside out. -/
 def fill (K : Ectx) (e : Expr) : Expr :=
   K.foldl (fun acc ki => fillItem ki acc) e
 
-/-- A single reduction of a redex, threading the heap through. Allocation picks any location
-that is unallocated in the current heap, so `newS` is nondeterministic. -/
-inductive BaseStep : Expr × Heap → Expr × Heap → Prop where
-  | betaS x e₁ e₂ h :
+/-- A single reduction of a redex. -/
+inductive BaseStep : Expr → Expr → Prop where
+  | betaS x e₁ e₂ :
       Expr.isVal e₂ →
-      BaseStep (.app (.lam x e₁) e₂, h) (subst' x e₂ e₁, h)
-  | tBetaS e h :
-      BaseStep (.tApp (.tLam e), h) (e, h)
-  | unpackS x e₁ e₂ h :
+      BaseStep (.app (.lam x e₁) e₂) (subst' x e₂ e₁)
+  | tBetaS e :
+      BaseStep (.tApp (.tLam e)) e
+  | unpackS x e₁ e₂ :
       Expr.isVal e₁ →
-      BaseStep (.unpack x (.pack e₁) e₂, h) (subst' x e₁ e₂, h)
-  | unOpS op e v v' h :
+      BaseStep (.unpack x (.pack e₁) e₂) (subst' x e₁ e₂)
+  | unOpS op e v v' :
       Expr.toVal? e = some v →
       unOpEval op v = some v' →
-      BaseStep (.unOp op e, h) (v'.toExpr, h)
-  | binOpS op e₁ e₂ v₁ v₂ v' h :
+      BaseStep (.unOp op e) v'.toExpr
+  | binOpS op e₁ e₂ v₁ v₂ v' :
       Expr.toVal? e₁ = some v₁ →
       Expr.toVal? e₂ = some v₂ →
       binOpEval op v₁ v₂ = some v' →
-      BaseStep (.binOp op e₁ e₂, h) (v'.toExpr, h)
-  | ifTrueS e₁ e₂ h :
-      BaseStep (.ite (.lit (.litBool true)) e₁ e₂, h) (e₁, h)
-  | ifFalseS e₁ e₂ h :
-      BaseStep (.ite (.lit (.litBool false)) e₁ e₂, h) (e₂, h)
-  | fstS e₁ e₂ h :
+      BaseStep (.binOp op e₁ e₂) v'.toExpr
+  | ifTrueS e₁ e₂ :
+      BaseStep (.ite (.lit (.litBool true)) e₁ e₂) e₁
+  | ifFalseS e₁ e₂ :
+      BaseStep (.ite (.lit (.litBool false)) e₁ e₂) e₂
+  | fstS e₁ e₂ :
       Expr.isVal e₁ → Expr.isVal e₂ →
-      BaseStep (.fst (.pair e₁ e₂), h) (e₁, h)
-  | sndS e₁ e₂ h :
+      BaseStep (.fst (.pair e₁ e₂)) e₁
+  | sndS e₁ e₂ :
       Expr.isVal e₁ → Expr.isVal e₂ →
-      BaseStep (.snd (.pair e₁ e₂), h) (e₂, h)
-  | caseLS e e₁ e₂ h :
+      BaseStep (.snd (.pair e₁ e₂)) e₂
+  | caseLS e e₁ e₂ :
       Expr.isVal e →
-      BaseStep (.case (.injL e) e₁ e₂, h) (.app e₁ e, h)
-  | caseRS e e₁ e₂ h :
+      BaseStep (.case (.injL e) e₁ e₂) (.app e₁ e)
+  | caseRS e e₁ e₂ :
       Expr.isVal e →
-      BaseStep (.case (.injR e) e₁ e₂, h) (.app e₂ e, h)
-  | unrollS e h :
-      Expr.isVal e →
-      BaseStep (.unroll (.roll e), h) (e, h)
-  | newS e v l h :
-      Expr.toVal? e = some v →
-      h l = none →
-      BaseStep (.new e, h) (.lit (.litLoc l), Heap.insert h l v)
-  | loadS l v h :
-      h l = some v →
-      BaseStep (.load (.lit (.litLoc l)), h) (v.toExpr, h)
-  | storeS l v e₂ h :
-      h l ≠ none →
-      Expr.toVal? e₂ = some v →
-      BaseStep (.store (.lit (.litLoc l)) e₂, h) (.lit .litUnit, Heap.insert h l v)
+      BaseStep (.case (.injR e) e₁ e₂) (.app e₂ e)
 
 /-- A reduction step of a whole program: a `BaseStep` under an evaluation context. -/
-inductive ContextualStep : Expr × Heap → Expr × Heap → Prop where
-  | ectxStep (K : Ectx) (e₁ e₂ : Expr) (h₁ h₂ : Heap) :
-      BaseStep (e₁, h₁) (e₂, h₂) →
-      ContextualStep (fill K e₁, h₁) (fill K e₂, h₂)
+inductive ContextualStep : Expr → Expr → Prop where
+  | ectxStep (K : Ectx) (e₁ e₂ : Expr) :
+      BaseStep e₁ e₂ →
+      ContextualStep (fill K e₁) (fill K e₂)
 
-def reducible (e : Expr) (h : Heap) : Prop := ∃ e' h', ContextualStep (e, h) (e', h')
+def reducible (e : Expr) : Prop := ∃ e', ContextualStep e e'
 
-def irreducible (e : Expr) (h : Heap) : Prop := ¬ reducible e h
+def irreducible (e : Expr) : Prop := ¬ reducible e
+
+/-- The reflexive-transitive closure of `ContextualStep`. -/
+inductive ContextualSteps : Expr → Expr → Prop where
+  | refl {e} : ContextualSteps e e
+  | step {e₁ e₂ e₃} : ContextualStep e₁ e₂ → ContextualSteps e₂ e₃ → ContextualSteps e₁ e₃
+
+theorem ContextualSteps.trans {e₁ e₂ e₃ : Expr}
+    (h₁ : ContextualSteps e₁ e₂) (h₂ : ContextualSteps e₂ e₃) : ContextualSteps e₁ e₃ := by
+  induction h₁ with
+  | refl => exact h₂
+  | step hs _ ih => exact .step hs (ih h₂)
+
+theorem ContextualSteps.single {e₁ e₂ : Expr} (h : ContextualStep e₁ e₂) :
+    ContextualSteps e₁ e₂ := .step h .refl
 
 /-! ## Closedness -/
 
@@ -348,13 +289,8 @@ def Expr.isClosed (X : List String) : Expr → Bool
   | .injL e => e.isClosed X
   | .injR e => e.isClosed X
   | .case e₀ e₁ e₂ => e₀.isClosed X && e₁.isClosed X && e₂.isClosed X
-  | .roll e => e.isClosed X
-  | .unroll e => e.isClosed X
-  | .load e => e.isClosed X
-  | .store e₁ e₂ => e₁.isClosed X && e₂.isClosed X
-  | .new e => e.isClosed X
 
 /-- `Prop`-valued form of `Expr.isClosed`, for use as a hypothesis. -/
 abbrev closed (X : List String) (e : Expr) : Prop := e.isClosed X = true
 
-end SystemFMuState
+end SystemF

@@ -1,10 +1,10 @@
-import LeanLR.TypeSystems.SystemFMuState.Lang
+import LeanLR.TypeSystems.SystemFMu.Lang
 
 import Iris.Std.PartialMap
 import Iris.Std.HeapInstances
 
 /-!
-# System F with recursive types and mutable state: parallel substitution
+# System F with recursive types: parallel substitution
 
 `substMap` substitutes a whole finite map of expressions at once. The main results relate it to the
 single-variable `subst` of `Lang.lean` and characterise when its result is closed.
@@ -12,7 +12,7 @@ single-variable `subst` of `Lang.lean` and characterise when its result is close
 
 open Iris.Std
 
-namespace SystemFMuState
+namespace SystemFMu
 
 /-! ## Parallel substitution -/
 
@@ -50,9 +50,6 @@ def substMap (xs : SubstMap) : Expr → Expr
   | .case e₀ e₁ e₂ => .case (substMap xs e₀) (substMap xs e₁) (substMap xs e₂)
   | .roll e => .roll (substMap xs e)
   | .unroll e => .unroll (substMap xs e)
-  | .load e => .load (substMap xs e)
-  | .store e₁ e₂ => .store (substMap xs e₁) (substMap xs e₂)
-  | .new e => .new (substMap xs e)
 
 /-- Deleting from the empty substitution changes nothing. -/
 private theorem binderDelete_empty (b : Binder) :
@@ -100,9 +97,9 @@ theorem closed_weaken {X Y : List String} {e : Expr}
     simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed ⊢
     exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 (cons_subset hsub)⟩
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     exact ih hclosed hsub
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed ⊢
     exact ⟨ih₁ hclosed.1 hsub, ih₂ hclosed.2 hsub⟩
   | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
@@ -149,12 +146,12 @@ theorem subst_closed_notmem {x : String} {es e : Expr} {X : List String}
             | head => exact hxy rfl
             | tail _ hmem' => exact hnotmem hmem'
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     simp only [closed, Expr.isClosed] at hclosed
     unfold subst
     congr 1
     exact ih hclosed hnotmem
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [closed, Expr.isClosed, Bool.and_eq_true] at hclosed
     unfold subst
     congr 1
@@ -238,10 +235,10 @@ theorem closed_subst {X : List String} {e es : Expr} {x : String}
       exact closed_shadow_binder he.2
     · exact ih₂ (closed_swap_binder he.2)
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih | injL _ ih
-  | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injR _ ih | roll _ ih | unroll _ ih =>
     simp only [subst, closed, Expr.isClosed] at he ⊢
     exact ih he
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [subst, closed, Expr.isClosed, Bool.and_eq_true] at he ⊢
     exact ⟨ih₁ he.1, ih₂ he.2⟩
   | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
@@ -403,11 +400,11 @@ theorem subst_substMap (x : String) (es : Expr) (m : SubstMap) (e : Expr)
             delete_insert_comm m es hxy]
           exact ih₂ _ (substIsClosed_delete y hclosed)
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     simp only [substMap, subst]
     congr 1
     exact ih m hclosed
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [substMap, subst]
     congr 1
     · exact ih₁ m hclosed
@@ -452,9 +449,6 @@ def closedModulo (θ : SubstMap) (Y : List String) : Expr → Prop
   | .case e₀ e₁ e₂ => closedModulo θ Y e₀ ∧ closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
   | .roll e => closedModulo θ Y e
   | .unroll e => closedModulo θ Y e
-  | .load e => closedModulo θ Y e
-  | .store e₁ e₂ => closedModulo θ Y e₁ ∧ closedModulo θ Y e₂
-  | .new e => closedModulo θ Y e
 
 /-- Descending under a binder preserves closedness of the substitution's range. -/
 theorem substIsClosed_binderDelete (b : Binder) (θ : SubstMap) (Y : List String) :
@@ -483,9 +477,9 @@ theorem substMap_closed_of_closedModulo (θ : SubstMap) (Y : List String) (e : E
     simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true]
     exact ⟨ih₁ θ Y hθ hcov.1, ih₂ _ _ (substIsClosed_binderDelete b θ Y hθ) hcov.2⟩
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     exact ih θ Y hθ hcov
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true]
     exact ⟨ih₁ θ Y hθ hcov.1, ih₂ θ Y hθ hcov.2⟩
   | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
@@ -516,9 +510,9 @@ theorem closedModulo_of_coverage (θ : SubstMap) (Y : List String) (e : Expr)
   | lam _ _ ih => exact ih _ _ (coverage_binderDelete hcov)
   | unpack _ _ _ ih₁ ih₂ => exact ⟨ih₁ θ Y hcov, ih₂ _ _ (coverage_binderDelete hcov)⟩
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     exact ih θ Y hcov
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     exact ⟨ih₁ θ Y hcov, ih₂ θ Y hcov⟩
   | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
     exact ⟨ih₀ θ Y hcov, ih₁ θ Y hcov, ih₂ θ Y hcov⟩
@@ -589,11 +583,11 @@ theorem substMap_is_closed {X : List String} {θ : SubstMap} {e : Expr} (he : cl
     simp only [substMap]
     rw [ih₁ he.1 hdom, ih₂ he.2 (binderDelete_avoids b hdom)]
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     simp only [closed, Expr.isClosed] at he
     simp only [substMap]
     rw [ih he hdom]
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [closed, Expr.isClosed, Bool.and_eq_true] at he
     simp only [substMap]
     rw [ih₁ he.1 hdom, ih₂ he.2 hdom]
@@ -651,10 +645,10 @@ theorem substMap_subst {θ : SubstMap} {x : String} {e es : Expr} (hes : closed 
         simp only [substMap, binderDelete]
         rw [ih₁, ih₂, delete_insert_comm θ es hxy]
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     simp only [subst, substMap]
     rw [ih]
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [subst, substMap]
     rw [ih₁, ih₂]
   | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
@@ -708,10 +702,10 @@ theorem closed_subst_weaken {X Y : List String} {θ : SubstMap} {e : Expr}
     exact ⟨ih₁ hθ hsub he.1,
       ih₂ (substIsClosed_binderDelete_nil b θ hθ) (binderDelete_sub b hsub) he.2⟩
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     simp only [substMap, closed, Expr.isClosed] at he ⊢
     exact ih hθ hsub he
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true] at he ⊢
     exact ⟨ih₁ hθ hsub he.1, ih₂ hθ hsub he.2⟩
   | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
@@ -784,10 +778,10 @@ theorem substMap_closed' {X Y : List String} {θ : SubstMap} {e : Expr} (he : cl
     simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true] at he ⊢
     exact ⟨ih₁ he.1 hcov, ih₂ he.2 (binderDelete_cov b hcov)⟩
   | unOp _ _ ih | tApp _ ih | tLam _ ih | pack _ ih | fst _ ih | snd _ ih
-  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih | load _ ih | new _ ih =>
+  | injL _ ih | injR _ ih | roll _ ih | unroll _ ih =>
     simp only [substMap, closed, Expr.isClosed] at he ⊢
     exact ih he hcov
-  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ | store _ _ ih₁ ih₂ =>
+  | app _ _ ih₁ ih₂ | binOp _ _ _ ih₁ ih₂ | pair _ _ ih₁ ih₂ =>
     simp only [substMap, closed, Expr.isClosed, Bool.and_eq_true] at he ⊢
     exact ⟨ih₁ he.1 hcov, ih₂ he.2 hcov⟩
   | ite _ _ _ ih₀ ih₁ ih₂ | case _ _ _ ih₀ ih₁ ih₂ =>
@@ -808,4 +802,4 @@ theorem substMap_closed {X : List String} {θ : SubstMap} {e : Expr}
       exact absurd he' (by simp)
   | some e' => exact hθ x e' hget
 
-end SystemFMuState
+end SystemFMu
