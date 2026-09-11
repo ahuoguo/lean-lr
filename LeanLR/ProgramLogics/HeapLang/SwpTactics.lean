@@ -73,6 +73,8 @@ section Contexts
 
 open Iris.HeapLang Iris.ProgramLogic
 
+instance ctxId : Language.Context (fun e : Exp => e) :=
+  show Language.Context (fill []) from inferInstance
 instance ctxAppL (v : Val) : Language.Context (fun e => Exp.app e (Exp.ofVal v)) :=
   show Language.Context (fill [ECtxItem.appL v]) from inferInstance
 instance ctxAppR (e₁ : Exp) : Language.Context (fun e => Exp.app e₁ e) :=
@@ -110,6 +112,19 @@ instance ctxStoreR (e₁ : Exp) : Language.Context (fun e => Exp.store e₁ e) :
   show Language.Context (fill [ECtxItem.storeR e₁]) from inferInstance
 
 end Contexts
+
+/-! ### Operator steps at arbitrary values
+
+`HoareLib`'s `pure_step_add`/`pure_step_eq`/… are for concrete literals. These are the general
+form, with the evaluation given as a side condition. -/
+
+theorem pure_step_binOpVal {op : BinOp} {v₁ v₂ v' : Val} (h : BinOp.eval op v₁ v₂ = some v') :
+    PureStep (Exp.binop op (.ofVal v₁) (.ofVal v₂)) (Exp.ofVal v') :=
+  PureStep.of_pureExec (instPureExecBinOp (op := op) (v1 := v₁) (v2 := v₂) (v' := v')) h
+
+theorem pure_step_unOpVal {op : UnOp} {v v' : Val} (h : UnOp.eval op v = some v') :
+    PureStep (Exp.unop op (.ofVal v)) (Exp.ofVal v') :=
+  PureStep.of_pureExec (instPureExecUnOp (op := op) (v := v) (v' := v')) h
 
 /-! ### Binding one frame
 

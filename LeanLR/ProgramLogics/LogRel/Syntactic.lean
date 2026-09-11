@@ -223,12 +223,12 @@ abbrev TypingContext := TyMapStr Ty
 /-- Shifts every type in the context up by one type variable, as the typing rules must whenever
 they descend under a type-variable binder. Rocq writes it `⤉ Γ`. -/
 def shiftCtx (Γ : TypingContext) : TypingContext :=
-  Std.ExtTreeMap.map (fun _ A => A.rename (· + 1)) Γ
+  Iris.Std.PartialMap.map (M := TyMapStr) (fun A : Ty => A.rename (· + 1)) Γ
 
 theorem shiftCtx_get? (Γ : TypingContext) (x : String) :
     get? (M := TyMapStr) (shiftCtx Γ) x
-      = (get? (M := TyMapStr) Γ x).map (fun A => A.rename (· + 1)) := by
-  simp [shiftCtx, get?, Std.ExtTreeMap.getElem?_map]
+      = (get? (M := TyMapStr) Γ x).map (fun A => A.rename (· + 1)) :=
+  Iris.Std.LawfulPartialMap.get?_map
 
 /-! ## Syntactic typing
 

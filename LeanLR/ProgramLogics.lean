@@ -9,8 +9,11 @@ import LeanLR.ProgramLogics.IpmPersistency
 import LeanLR.ProgramLogics.LaterLoeb
 import LeanLR.ProgramLogics.Concurrency
 import LeanLR.ProgramLogics.Arc
+import LeanLR.ProgramLogics.Fupd
+import LeanLR.ProgramLogics.SeqAdequacy
 import LeanLR.ProgramLogics.RaLib
 import LeanLR.ProgramLogics.ResourceAlgebras1
 import LeanLR.ProgramLogics.GhostTheories
 import LeanLR.ProgramLogics.Oplss
 import LeanLR.ProgramLogics.LogRel
+import LeanLR.ProgramLogics.Reloc

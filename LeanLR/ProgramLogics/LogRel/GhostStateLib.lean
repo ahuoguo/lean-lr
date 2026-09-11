@@ -65,12 +65,25 @@ theorem mono_nat_make_bound : mono (GF := GF) γ n ⊢ lb γ n := by
   iintro H
   iapply MonoNat.lb_own_get γ _ _ $$ H
 
+/-- Reading off the bound keeps the authoritative element: this is what Rocq's `iPoseProof … as
+"#Hbound"` does in one step, `lb` being persistent. -/
+theorem mono_nat_get_bound : mono (GF := GF) γ n ⊢ iprop(mono γ n ∗ lb γ n) :=
+  (BI.and_intro .rfl mono_nat_make_bound).trans BI.persistent_and_sep_mp
+
 theorem mono_nat_use_bound : ⊢@{IProp GF} mono γ n -∗ lb γ m -∗ ⌜m ≤ n⌝ := by
   unfold mono lb
   iintro Hauth Hlb
   icases MonoNat.auth_lb_own_valid γ _ _ _ $$ Hauth Hlb with %Hv
   ipureintro
   exact Hv.2
+
+/-- Using the bound keeps the authoritative element; the conclusion being pure, this is the one
+step Rocq's `iPoseProof … as "%Hleq"` takes. -/
+theorem mono_nat_use_bound' :
+    iprop(mono (GF := GF) γ n ∗ lb γ m) ⊢ iprop(mono γ n ∗ ⌜m ≤ n⌝) := by
+  refine (BI.and_intro BI.sep_elim_left ?_).trans BI.persistent_and_sep_mp
+  iintro ⟨Hauth, Hlb⟩
+  iapply mono_nat_use_bound $$ Hauth Hlb
 
 theorem mono_nat_increase_val : ⊢@{IProp GF} mono γ n -∗ |==> mono γ (n + 1) := by
   unfold mono
@@ -114,6 +127,13 @@ theorem ghalves_alloc (a : A) :
 theorem ghalves_agree : ⊢@{IProp GF} ghalf γ a -∗ ghalf γ b -∗ ⌜a = b⌝ := by
   unfold ghalf
   exact ghost_var_agree γ a _ b _
+
+/-- Agreement keeps both halves; the conclusion is pure. -/
+theorem ghalves_agree' :
+    iprop(ghalf (GF := GF) γ a ∗ ghalf γ b) ⊢ iprop((ghalf γ a ∗ ghalf γ b) ∗ ⌜a = b⌝) := by
+  refine (BI.and_intro .rfl ?_).trans BI.persistent_and_sep_mp
+  iintro ⟨H1, H2⟩
+  iapply ghalves_agree $$ H1 H2
 
 theorem ghalves_update (c : A) :
     ⊢@{IProp GF} ghalf γ a -∗ ghalf γ b -∗ |==> (ghalf γ c ∗ ghalf γ c) := by
