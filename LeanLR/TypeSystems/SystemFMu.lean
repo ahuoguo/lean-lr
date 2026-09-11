@@ -6,3 +6,6 @@ import LeanLR.TypeSystems.SystemFMu.ParallelSubst
 import LeanLR.TypeSystems.SystemFMu.TypeSafety
 import LeanLR.TypeSystems.SystemFMu.UntypedEncoding
 import LeanLR.TypeSystems.SystemFMu.LogRel
+import LeanLR.TypeSystems.SystemFMu.Tactics
+import LeanLR.TypeSystems.SystemFMu.Exercises05
+import LeanLR.TypeSystems.SystemFMu.ZCombinator

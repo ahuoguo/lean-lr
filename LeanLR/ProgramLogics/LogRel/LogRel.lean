@@ -932,4 +932,165 @@ theorem fundamental {n : Nat} {Γ : TypingContext} {e : Exp} {A : Ty} (h : SynTy
   | typed_store _ _ _ _ _ _ _ ih₁ ih₂ => exact compat_store ih₁ ih₂
   | typed_new _ _ _ _ _ ih => exact compat_new ih
 
+/-! ## A mutable bit
+
+The file's own `mutbit` section: the program is safe because the location only ever holds `0` or
+`1`, which a plain invariant records — no ghost state needed. `assertE` is the course's `assert`;
+`ghost_state_sol.v` declares the same thing, and `GhostState.lean` reuses this one. -/
+
+/-- The course's `assert`: a failed assertion applies an integer to an integer and is stuck. -/
+def assertE (e : Exp) : Exp := hl(if &e then #() else #(0 : Int) #(0 : Int))
+
+section MutBit
+
+/-- `(Unit → Unit) × (Unit → Bool)`. -/
+def mutbitT : Ty := .prod (.fn .unit .unit) (.fn .unit .bool)
+
+def myMutBit : Exp :=
+  hl(let x := ref(#(0 : Int));
+     ((λ y, (&(assertE hl(((!x = #(0 : Int)) || (!x = #(1 : Int)))));
+             x ← (#(1 : Int) - !x))),
+      (λ y, (&(assertE hl(((!x = #(0 : Int)) || (!x = #(1 : Int)))));
+             #(0 : Int) < !x))))
+
+def mutbitN : Namespace := nroot .@ "mutbit"
+
+/-- Rocq writes this invariant inline. -/
+def mutbitInv (l : Loc) : IProp GF :=
+  iprop((l ↦ some hl_val(#(0 : Int))) ∨ (l ↦ some hl_val(#(1 : Int))))
+
+private theorem eq00 : ((hl_val(#(0 : Int)) : Val) == hl_val(#(0 : Int))) = true := rfl
+private theorem eq10 : ((hl_val(#(1 : Int)) : Val) == hl_val(#(0 : Int))) = false := rfl
+private theorem eq11 : ((hl_val(#(1 : Int)) : Val) == hl_val(#(1 : Int))) = true := rfl
+private theorem sub10 : ((1 : Int) - 0) = 1 := by decide
+private theorem sub11 : ((1 : Int) - 1) = 0 := by decide
+private theorem lt00 : decide ((0 : Int) < 0) = false := by decide
+private theorem lt01 : decide ((0 : Int) < 1) = true := by decide
+
+theorem mymutbit_typed : semTyped GF 0 ∅ myMutBit mutbitT := by
+  unfold semTyped
+  iintro %δ %γ #Hctx
+  icases contextInterp_empty_inv γ δ $$ Hctx with %hγ
+  subst hγ
+  rw [Exp.substMap_empty (M := TyMapStr)]
+  simp only [exprInterp, myMutBit]
+  swp_enter Hcl
+  wp_alloc l with Hl
+  wp_pures
+  imod Iris.inv_alloc mutbitN (∅ : CoPset) (mutbitInv (GF := GF) l) $$ [Hl] with #Hinv
+  · inext
+    unfold mutbitInv
+    ileft
+    iexact Hl
+  imod Hcl
+  imodintro
+  simp only [mutbitT, typeInterp_prod, typeInterp_fn, typeInterp_unit, typeInterp_bool,
+    prodInterp_car]
+  iexists _, _
+  isplitr
+  · ipureintro; rfl
+  isplitr
+  · simp only [funInterp_car, unitInterp_car]
+    iintro %w !> %hw
+    subst hw
+    simp only [exprInterp, assertE]
+    swp_pures
+    iapply ImpredInvariants.inv_open (N := mutbitN) (by simp) $$ Hinv
+    iintro HI
+    unfold mutbitInv
+    swp_enter Hcl2
+    simp only [unitInterp_car]
+    icases HI with ⟨>Hl | >Hl⟩
+    · wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [eq00]
+      wp_pures
+      wp_bind (!#l)
+      wp_load
+      wp_pures
+      wp_store
+      simp only [sub10]
+      imod Hcl2
+      imodintro
+      isplitl [Hl]
+      · inext
+        iright
+        iexact Hl
+      · ipureintro; trivial
+    · wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [eq10]
+      wp_pures
+      wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [eq11]
+      wp_pures
+      wp_bind (!#l)
+      wp_load
+      wp_pures
+      wp_store
+      simp only [sub11]
+      imod Hcl2
+      imodintro
+      isplitl [Hl]
+      · inext
+        ileft
+        iexact Hl
+      · ipureintro; trivial
+  · simp only [funInterp_car, unitInterp_car]
+    iintro %w !> %hw
+    subst hw
+    simp only [exprInterp, assertE]
+    swp_pures
+    iapply ImpredInvariants.inv_open (N := mutbitN) (by simp) $$ Hinv
+    iintro HI
+    unfold mutbitInv
+    swp_enter Hcl2
+    simp only [boolInterp_car]
+    icases HI with ⟨>Hl | >Hl⟩
+    · wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [eq00]
+      wp_pures
+      wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [lt00]
+      imod Hcl2
+      imodintro
+      isplitl [Hl]
+      · inext
+        ileft
+        iexact Hl
+      · iexists false
+        ipureintro; rfl
+    · wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [eq10]
+      wp_pures
+      wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [eq11]
+      wp_pures
+      wp_bind (!#l)
+      wp_load
+      wp_pures
+      simp only [lt01]
+      imod Hcl2
+      imodintro
+      isplitl [Hl]
+      · inext
+        iright
+        iexact Hl
+      · iexists true
+        ipureintro; rfl
+
+end MutBit
+
 end ProgramLogics.LogRel

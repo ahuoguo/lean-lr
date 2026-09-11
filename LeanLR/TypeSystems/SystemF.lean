@@ -11,3 +11,6 @@ import LeanLR.TypeSystems.SystemF.FreeTheorems
 import LeanLR.TypeSystems.SystemF.ExistentialInvariants
 import LeanLR.TypeSystems.SystemF.BinaryLogRel
 import LeanLR.TypeSystems.SystemF.ChurchEncodingsFaithful
+import LeanLR.TypeSystems.SystemF.Tactics
+import LeanLR.TypeSystems.SystemF.Exercises03
+import LeanLR.TypeSystems.SystemF.Exercises04

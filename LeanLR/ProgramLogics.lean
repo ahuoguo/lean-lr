@@ -15,5 +15,6 @@ import LeanLR.ProgramLogics.RaLib
 import LeanLR.ProgramLogics.ResourceAlgebras1
 import LeanLR.ProgramLogics.GhostTheories
 import LeanLR.ProgramLogics.Oplss
+import LeanLR.ProgramLogics.Oplss2
 import LeanLR.ProgramLogics.LogRel
 import LeanLR.ProgramLogics.Reloc

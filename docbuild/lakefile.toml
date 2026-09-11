@@ -1,0 +1,23 @@
+# A separate package whose only job is to run `doc-gen4` over `LeanLR`.
+#
+# Keeping it out of the root `lakefile.toml` means `doc-gen4` and its dependencies never enter
+# the library's own `lake-manifest.json`, so a plain `lake build` stays unaffected.
+#
+# Build the documentation with
+#
+#     cd docbuild && lake update doc-gen4 && lake build LeanLR:docs
+#
+# which writes it to `docbuild/.lake/build/doc`. `rev` below must track `lean-toolchain`.
+name = "docbuild"
+reservoir = false
+version = "0.1.0"
+packagesDir = "../.lake/packages"
+
+[[require]]
+name = "lean-lr"
+path = "../"
+
+[[require]]
+name = "doc-gen4"
+git = "https://github.com/leanprover/doc-gen4"
+rev = "v4.32.2"

@@ -11,7 +11,7 @@ fundamental theorem `sem_soundness` and the type safety theorem `type_safety`.
 
 The step index `k` is what makes the recursive type `mu` well-founded; the world `W` records the
 heap invariants that constrain the mutable state. Since only first-order values may be stored, the
-world is a plain list of `HeapInv`s and `wsat` stays first-order.
+world is a plain list of per-location `HeapInv`s and `wsat` stays first-order.
 -/
 
 open Iris.Std
@@ -32,22 +32,21 @@ def foValRel : FoTy → Val → Prop
   | .sum _ b, .injRV v => foValRel b v
   | _, _ => False
 
-/-- A heap invariant governs a single location, asserting that it holds a value of the given
-first-order type.
+/-- A heap invariant governs a single location, asserting that its contents satisfy `pred`.
 
-Because `Ty.ref` is confined to first-order types, an invariant only ever has this concrete shape —
-"location `l` holds a value of type `a`" — rather than being an arbitrary heap predicate. That is
-what keeps `wsat` reasoning first-order. -/
+Rocq's `heap_inv` is an arbitrary predicate on *heaps*; confining each invariant to a single
+location is what keeps `wsat` reasoning first-order, and is all that `Ty.ref` — which is confined
+to first-order types — ever needs. The predicate itself is left arbitrary so that a *program* can
+install a stronger invariant than its type demands (`mutbit.v`). -/
 structure HeapInv where
   loc : Loc
-  ty : FoTy
-  deriving Repr, DecidableEq
+  pred : Val → Prop
 
 /-- A world is the list of heap invariants currently in force. -/
 abbrev World := List HeapInv
 
 /-- An arbitrary invariant, so that `World` lookups have a default. -/
-instance : Inhabited HeapInv := ⟨⟨⟨0⟩, .unit⟩⟩
+instance : Inhabited HeapInv := ⟨⟨⟨0⟩, fun _ => True⟩⟩
 
 /-- `W'` extends `W` when `W` is a *prefix* of `W'`, i.e. `W'` appends new invariants at the end.
 Appending rather than consing keeps world indices stable under extension, so the index at which a
@@ -97,7 +96,7 @@ The explicit disjointness conjunct is what makes a store through one invariant u
 another: it forces the invariant governing a location to be unique. -/
 def wsat (W : World) (h : Heap) : Prop :=
   Heap.bounded h ∧
-  (∀ INV ∈ W, ∃ v, h INV.loc = some v ∧ foValRel INV.ty v) ∧
+  (∀ INV ∈ W, ∃ v, h INV.loc = some v ∧ INV.pred v) ∧
   (∀ INV₁ ∈ W, ∀ INV₂ ∈ W, INV₁.loc = INV₂.loc → INV₁ = INV₂)
 
 /-! ## The logical relation -/
@@ -184,7 +183,7 @@ mutual
         SystemFMuState.closed [] v.toExpr ∧
         ∀ kd, valRel δ (Ty.subst1 A (.mu A)) (k - kd) W v
     | .mu _, _, _ => False
-    | .ref a, _, .litV (.litLoc l) => ⟨l, a⟩ ∈ W
+    | .ref a, _, .litV (.litLoc l) => (⟨l, foValRel a⟩ : HeapInv) ∈ W
     | .ref _, _, _ => False
   termination_by (k, A.size, 0)
   decreasing_by
@@ -2663,7 +2662,7 @@ theorem wsat_wext {W W' : World} {h : Heap} (hext : worldExt W W') (hsat : wsat 
 /-- Reads off the invariant for a location recorded in the world. -/
 theorem wsat_lookup {W : World} {h : Heap} {INV : HeapInv}
     (hsat : wsat W h) (hmem : INV ∈ W) :
-    ∃ v, h INV.loc = some v ∧ foValRel INV.ty v :=
+    ∃ v, h INV.loc = some v ∧ INV.pred v :=
   hsat.2.1 INV hmem
 
 /-- A location the heap does not define is governed by no invariant. -/
@@ -2676,9 +2675,9 @@ theorem wsat_fresh_not_mem {W : World} {h : Heap} {l : Loc}
 
 /-- Allocating a fresh location extends the world with a new invariant. Disjointness is preserved
 because the fresh location is governed by no existing invariant. -/
-theorem wsat_alloc {W : World} {h : Heap} {l : Loc} {v : Val} {a : FoTy}
-    (hsat : wsat W h) (hfresh : h l = none) (hv : foValRel a v) :
-    wsat (W ++ [⟨l, a⟩]) (Heap.insert h l v) := by
+theorem wsat_alloc {W : World} {h : Heap} {l : Loc} {v : Val} {P : Val → Prop}
+    (hsat : wsat W h) (hfresh : h l = none) (hv : P v) :
+    wsat (W ++ [⟨l, P⟩]) (Heap.insert h l v) := by
   have hne : ∀ INV ∈ W, INV.loc ≠ l := wsat_fresh_not_mem hsat hfresh
   refine ⟨Heap.bounded_insert hsat.1, ?_, ?_⟩
   · intro INV hmem
@@ -2687,30 +2686,30 @@ theorem wsat_alloc {W : World} {h : Heap} {l : Loc} {v : Val} {a : FoTy}
       refine ⟨v', ?_, hrel⟩
       simp only [Heap.insert, if_neg (hne INV hmemW)]
       exact hlook
-    · obtain rfl : INV = ⟨l, a⟩ := by simpa using hmemNew
+    · obtain rfl : INV = ⟨l, P⟩ := by simpa using hmemNew
       exact ⟨v, by simp [Heap.insert], hv⟩
   · intro INV₁ hmem₁ INV₂ hmem₂ hloc
     obtain h₁ | h₁ := List.mem_append.mp hmem₁ <;>
       obtain h₂ | h₂ := List.mem_append.mp hmem₂
     · exact hsat.2.2 INV₁ h₁ INV₂ h₂ hloc
-    · obtain rfl : INV₂ = ⟨l, a⟩ := by simpa using h₂
+    · obtain rfl : INV₂ = ⟨l, P⟩ := by simpa using h₂
       exact absurd hloc (hne INV₁ h₁)
-    · obtain rfl : INV₁ = ⟨l, a⟩ := by simpa using h₁
+    · obtain rfl : INV₁ = ⟨l, P⟩ := by simpa using h₁
       exact absurd hloc.symm (hne INV₂ h₂)
-    · obtain rfl : INV₁ = ⟨l, a⟩ := by simpa using h₁
-      obtain rfl : INV₂ = ⟨l, a⟩ := by simpa using h₂
+    · obtain rfl : INV₁ = ⟨l, P⟩ := by simpa using h₁
+      obtain rfl : INV₂ = ⟨l, P⟩ := by simpa using h₂
       rfl
 
 /-- Overwriting a location with a value of its recorded type preserves satisfaction. -/
-theorem wsat_update {W : World} {h : Heap} {l : Loc} {v : Val} {a : FoTy}
-    (hsat : wsat W h) (hmem : (⟨l, a⟩ : HeapInv) ∈ W) (hv : foValRel a v) :
+theorem wsat_update {W : World} {h : Heap} {l : Loc} {v : Val} {P : Val → Prop}
+    (hsat : wsat W h) (hmem : (⟨l, P⟩ : HeapInv) ∈ W) (hv : P v) :
     wsat W (Heap.insert h l v) := by
   refine ⟨Heap.bounded_insert hsat.1, ?_, hsat.2.2⟩
   intro INV hmemINV
   by_cases hloc : INV.loc = l
   · -- By the disjointness clause of `wsat`, an invariant governing `l` must be the
     -- very one we are storing through, so its type is `a`.
-    obtain rfl : INV = ⟨l, a⟩ := hsat.2.2 INV hmemINV ⟨l, a⟩ hmem hloc
+    obtain rfl : INV = ⟨l, P⟩ := hsat.2.2 INV hmemINV ⟨l, P⟩ hmem hloc
     exact ⟨v, by simp [Heap.insert], hv⟩
   · obtain ⟨v', hlook, hrel⟩ := wsat_lookup hsat hmemINV
     refine ⟨v', ?_, hrel⟩
@@ -2736,19 +2735,19 @@ theorem compat_new (Γ : TypingContext) (e : Expr) (a : FoTy) :
   obtain ⟨hn1, l, hres, hheap, hfr⟩ :=
     new_nsteps_inv (v := v) (toVal?_toExpr v) (Heap.bounded_fresh hwsat.1) hred
   subst hn1
-  refine ⟨.litV (.litLoc l), W'' ++ [⟨l, a⟩], by rw [hres]; rfl,
-    ⟨[⟨l, a⟩], rfl⟩, ?_, ?_⟩
+  refine ⟨.litV (.litLoc l), W'' ++ [⟨l, foValRel a⟩], by rw [hres]; rfl,
+    ⟨[⟨l, foValRel a⟩], rfl⟩, ?_, ?_⟩
   · rw [hheap]
     refine wsat_alloc hwsat hfr ((foValRel_valRel a δ (k - j) W'' v).mpr ?_)
     exact valRel_mono_world δ a.toTy (k - j) W' W'' v hext' hv
-  · show valRel δ (.ref a) (k - j - 1) (W'' ++ [⟨l, a⟩]) (.litV (.litLoc l))
+  · show valRel δ (.ref a) (k - j - 1) (W'' ++ [⟨l, foValRel a⟩]) (.litV (.litLoc l))
     rw [valRel]
     exact List.mem_append_right _ (List.mem_singleton_self _)
 
 /-- A value of reference type is a location whose invariant the world records. -/
 private theorem valRel_ref_inv {δ : TyVarInterp} {a : FoTy} {k : Nat} {W : World} {v : Val}
     (hv : valRel δ (.ref a) k W v) :
-    ∃ l : Loc, v = .litV (.litLoc l) ∧ (⟨l, a⟩ : HeapInv) ∈ W := by
+    ∃ l : Loc, v = .litV (.litLoc l) ∧ (⟨l, foValRel a⟩ : HeapInv) ∈ W := by
   match v with
   | .litV (.litLoc l) => exact ⟨l, rfl, by rw [valRel] at hv; exact hv⟩
   | .litV (.litInt _) | .litV (.litBool _) | .litV .litUnit
@@ -3034,14 +3033,14 @@ theorem sem_soundness {n Γ hctx e A} :
 
 /-- The semantic type containing every closed value. A closed program has no free type variables, so
 which semantic type the interpretation supplies is immaterial; this is the cheapest one to build. -/
-private def anySemType : SemType where
+def anySemType : SemType where
   rel _ _ v := SystemFMuState.closed [] v.toExpr
   closed_val := by intros; assumption
   mono := by intros; assumption
   mono_world := by intros; assumption
 
-/-- The interpretation used to instantiate `semTyped` for a closed program. -/
-private def anyTyVarInterp : TyVarInterp := fun _ => anySemType
+/-- The interpretation used to instantiate `semTyped` for a closed program. Rocq's `δ_any`. -/
+def anyTyVarInterp : TyVarInterp := fun _ => anySemType
 
 /-- Type safety: a well-typed closed program never gets stuck. Any complete reduction from it ends
 in a value, since `semTyped` at index `n + 1` covers reductions of length `n`. -/

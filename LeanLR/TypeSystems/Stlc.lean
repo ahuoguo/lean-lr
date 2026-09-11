@@ -6,3 +6,7 @@ import LeanLR.TypeSystems.Stlc.ParallelSubst
 import LeanLR.TypeSystems.Stlc.Untyped
 import LeanLR.TypeSystems.Stlc.TypeSafety
 import LeanLR.TypeSystems.Stlc.LogRel
+import LeanLR.TypeSystems.Stlc.CbnLogRel
+import LeanLR.TypeSystems.Stlc.Lecture2
+import LeanLR.TypeSystems.Stlc.Exercises01
+import LeanLR.TypeSystems.Stlc.Exercises02

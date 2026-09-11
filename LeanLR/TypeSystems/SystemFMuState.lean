@@ -5,3 +5,6 @@ import LeanLR.TypeSystems.SystemFMuState.Execution
 import LeanLR.TypeSystems.SystemFMuState.ParallelSubst
 import LeanLR.TypeSystems.SystemFMuState.LogRel
 import LeanLR.TypeSystems.SystemFMuState.TypeSafety
+import LeanLR.TypeSystems.SystemFMuState.Tactics
+import LeanLR.TypeSystems.SystemFMuState.Exercises07
+import LeanLR.TypeSystems.SystemFMuState.MutBit
